@@ -1,0 +1,29 @@
+{
+  "deny": [
+    "Read(.env*)",
+    "Read(*.key)",
+    "Read(*.pem)",
+    "Read(*secrets*)",
+    "Read(*credentials*)",
+    "Read(.next/**)",
+    "Read(node_modules/**)"
+  ],
+  "permissions": {
+    "allow": [
+      "Read(src/**)",
+      "Read(supabase/**)",
+      "Read(CLAUDE.md)",
+      "Read(AGENTS.md)",
+      "Read(*.json)",
+      "Read(*.ts)",
+      "Read(*.tsx)",
+      "Read(*.css)",
+      "Read(*.md)",
+      "Write(src/**)",
+      "Write(supabase/**)",
+      "Bash(pnpm *)",
+      "Bash(npx *)",
+      "Bash(git *)"
+    ]
+  }
+}

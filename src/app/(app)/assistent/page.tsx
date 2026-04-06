@@ -71,22 +71,33 @@ export default function AssistantPage() {
     messageId: string;
     toolCalls: ToolCall[];
   } | null>(null);
+  const [voiceTtsEnabled, setVoiceTtsEnabled] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const voice = useVoice();
 
+  // Load voice_tts_enabled preference
+  useEffect(() => {
+    async function loadTtsPref() {
+      try {
+        const res = await fetch("/api/preferences");
+        if (res.ok) {
+          const data = await res.json();
+          setVoiceTtsEnabled(data.voice_tts_enabled === true);
+        }
+      } catch {
+        // Default to false
+      }
+    }
+    loadTtsPref();
+  }, []);
+
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // When voice transcript completes, send it as input
-  useEffect(() => {
-    if (voice.transcript && !voice.isListening) {
-      setInput(voice.transcript);
-      voice.reset();
-    }
-  }, [voice.isListening, voice.transcript, voice.reset]);
+  const lastTranscriptRef = useRef<string>("");
 
   const sendCommand = useCallback(
     async (text: string, isVoice = false) => {
@@ -129,6 +140,12 @@ export default function AssistantPage() {
 
         setMessages((prev) => [...prev, assistantMessage]);
 
+        // Speak the response if TTS is enabled and the command was voice-originated
+        if (voiceTtsEnabled && isVoice && voice.capabilities.speechSynthesis) {
+          const textToSpeak = data.response || data.explanation || "";
+          if (textToSpeak) voice.speak(textToSpeak);
+        }
+
         // If confirmation is required and there are pending tool calls
         if (
           data.confirmationRequired &&
@@ -155,8 +172,18 @@ export default function AssistantPage() {
         setIsLoading(false);
       }
     },
-    [isLoading]
+    [isLoading, voiceTtsEnabled, voice]
   );
+
+  // When voice transcript completes, auto-submit through the real command pipeline
+  useEffect(() => {
+    if (voice.transcript && !voice.isListening && voice.transcript !== lastTranscriptRef.current) {
+      lastTranscriptRef.current = voice.transcript;
+      const transcript = voice.transcript;
+      voice.reset();
+      sendCommand(transcript, true);
+    }
+  }, [voice.isListening, voice.transcript, voice.reset, sendCommand, voice]);
 
   const handleSend = () => {
     sendCommand(input);

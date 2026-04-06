@@ -4,7 +4,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: "create_task",
     description:
-      "Opprett en ny oppgave i systemet. Brukes når brukeren vil legge til noe som skal gjøres.",
+      "Opprett en ny oppgave i systemet. Brukes når brukeren vil legge til noe som skal gjøres. Område (area) er påkrevd.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -15,8 +15,8 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         },
         area: {
           type: "string",
-          enum: ["asplan-viak", "ytly", "privat", "okonomi", "trening"],
-          description: "Hvilket område oppgaven tilhører",
+          enum: ["asplan-viak", "ytly", "privat", "jobb", "helse", "okonomi", "trening"],
+          description: "Hvilket område oppgaven tilhører (påkrevd). Bruk 'privat' som standard hvis brukeren ikke spesifiserer.",
         },
         priority: {
           type: "string",
@@ -40,12 +40,12 @@ export const AI_TOOLS: Anthropic.Tool[] = [
           description: "Estimert tid i minutter",
         },
       },
-      required: ["title"],
+      required: ["title", "area"],
     },
   },
   {
     name: "create_event",
-    description: "Opprett en ny hendelse/møte i kalenderen.",
+    description: "Opprett en ny hendelse/møte i kalenderen. Område (area) er påkrevd. Hvis sluttid ikke oppgis, brukes +60 minutter fra starttid.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -53,7 +53,8 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         description: { type: "string", description: "Valgfri beskrivelse" },
         area: {
           type: "string",
-          enum: ["asplan-viak", "ytly", "privat", "okonomi", "trening"],
+          enum: ["asplan-viak", "ytly", "privat", "jobb", "helse", "okonomi", "trening"],
+          description: "Hvilket område hendelsen tilhører (påkrevd). Bruk 'privat' som standard.",
         },
         start_time: {
           type: "string",
@@ -61,7 +62,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         },
         end_time: {
           type: "string",
-          description: "Sluttid (ISO 8601 med tidssone)",
+          description: "Sluttid (ISO 8601). Hvis ikke oppgitt, settes til 60 minutter etter starttid.",
         },
         all_day: { type: "boolean", description: "Heldagshendelse" },
         location: { type: "string", description: "Sted" },
@@ -77,7 +78,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
           ],
         },
       },
-      required: ["title", "start_time"],
+      required: ["title", "start_time", "area"],
     },
   },
   {
@@ -165,7 +166,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         content: { type: "string", description: "Innhold" },
         area: {
           type: "string",
-          enum: ["asplan-viak", "ytly", "privat", "okonomi", "trening"],
+          enum: ["asplan-viak", "ytly", "privat", "jobb", "helse", "okonomi", "trening"],
         },
       },
       required: ["title", "content"],

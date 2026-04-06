@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Plus,
   ArrowUpDown,
@@ -216,6 +217,8 @@ export default function OppgaverPage() {
     }
     init();
   }, [loadTasks, loadAreas, loadProjects, loadGoals]);
+
+  // Deep-link: handled by TaskDeepLinker component wrapped in Suspense
 
   // -----------------------------------------------------------------------
   // Derived lists
@@ -573,6 +576,39 @@ export default function OppgaverPage() {
           />
         </DialogContent>
       </Dialog>
+
+      {/* Deep-link support: ?taskId=<uuid> opens task detail */}
+      <Suspense fallback={null}>
+        <TaskDeepLinker tasks={tasks} onOpenTask={setEditingTask} onOpenForm={setFormOpen} />
+      </Suspense>
     </div>
   );
+}
+
+// Deep-link handler (wrapped in Suspense)
+function TaskDeepLinker({
+  tasks,
+  onOpenTask,
+  onOpenForm,
+}: {
+  tasks: TaskItemData[];
+  onOpenTask: (task: TaskItemData) => void;
+  onOpenForm: (open: boolean) => void;
+}) {
+  const searchParams = useSearchParams();
+  const handled = useRef(false);
+
+  useEffect(() => {
+    const taskId = searchParams.get("taskId");
+    if (taskId && tasks.length > 0 && !handled.current) {
+      const found = tasks.find((t) => t.id === taskId);
+      if (found) {
+        onOpenTask(found);
+        onOpenForm(true);
+        handled.current = true;
+      }
+    }
+  }, [searchParams, tasks, onOpenTask, onOpenForm]);
+
+  return null;
 }

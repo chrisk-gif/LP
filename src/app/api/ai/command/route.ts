@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { routeCommand } from "@/lib/ai/orchestrator";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { executeToolCall } from "@/lib/ai/executor";
+import { executeToolCall, normalizeToolCallInput, READ_ONLY_TOOLS } from "@/lib/ai/executor";
 import type { ExecutionResult } from "@/lib/ai/executor";
 import { CONFIDENCE_THRESHOLDS } from "@/lib/constants";
 
@@ -42,9 +42,21 @@ export async function POST(request: NextRequest) {
       const responses: string[] = [];
 
       for (const tc of pendingToolCalls) {
+        // Normalize before execution — even confirmed writes must not skip validation
+        const norm = normalizeToolCallInput(tc.name, tc.input);
+        if (!norm.ok) {
+          actions.push({
+            action: tc.name,
+            status: "failed",
+            message: norm.message ?? `Mangler felt: ${norm.missing.join(", ")}`,
+          });
+          responses.push(norm.message ?? "Ufullstendig data.");
+          continue;
+        }
+
         const result: ExecutionResult = await executeToolCall(
           tc.name,
-          tc.input,
+          norm.input,
           user.id,
           { confidence: 1.0, autoExecuted: false, confirmedByUser: true }
         );
@@ -118,21 +130,31 @@ export async function POST(request: NextRequest) {
 
     // Read-only queries can always execute (no write side-effects)
     const isReadOnly = result.toolCalls?.every(
-      (tc) => tc.name === "query_data"
+      (tc) => READ_ONLY_TOOLS.has(tc.name)
     ) ?? false;
 
+    // Normalize all tool calls before deciding on auto-execution
+    let allNormalized = true;
+    const normalizedToolCalls = (result.toolCalls ?? []).map((tc) => {
+      const norm = normalizeToolCallInput(tc.name, tc.input);
+      if (!norm.ok) allNormalized = false;
+      return { ...tc, input: norm.input, normOk: norm.ok, normMissing: norm.missing, normMessage: norm.message };
+    });
+
+    // Write tools with unresolved required fields must force confirmation, never auto-execute
     const canAutoExecute =
       hasToolCalls &&
       highConfidence &&
       !result.confirmationRequired &&
+      allNormalized &&
       (isReadOnly || userAutoExecute);
 
-    if (canAutoExecute && result.toolCalls) {
+    if (canAutoExecute && normalizedToolCalls.length > 0) {
       // Auto-execute the tool calls
       const actions: ActionResult[] = [];
       const responses: string[] = [];
 
-      for (const tc of result.toolCalls) {
+      for (const tc of normalizedToolCalls) {
         const execResult: ExecutionResult = await executeToolCall(
           tc.name,
           tc.input,
@@ -165,15 +187,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Return parsed intent without executing (confirmation required or
-    // low confidence or no tool calls or auto-execute disabled)
+    // low confidence or no tool calls or auto-execute disabled or unresolved fields)
+    // Send the normalized tool calls so end_time defaults etc. are visible in confirmation UI
+    const toolCallsForResponse = normalizedToolCalls.map(({ normOk: _a, normMissing: _b, normMessage: _c, ...rest }) => rest);
     return NextResponse.json({
       intent: result.intent,
       confidence: result.confidence,
-      response: result.explanation,
+      response: !allNormalized
+        ? `${result.explanation} (Mangler felt som må fylles ut: ${normalizedToolCalls.filter(tc => !tc.normOk).flatMap(tc => tc.normMissing).join(", ")})`
+        : result.explanation,
       fields: result.fields,
       area: result.area,
       confirmationRequired: hasToolCalls && !isReadOnly ? true : false,
-      toolCalls: result.toolCalls,
+      toolCalls: toolCallsForResponse,
       actions: [],
     });
   } catch (error) {

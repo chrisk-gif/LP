@@ -8,12 +8,12 @@ import { z } from 'zod';
 // Shared enum schemas
 // ---------------------------------------------------------------------------
 
+// SQL enum: daily, weekly, monthly, quarterly (no 'yearly')
 export const reviewPeriodSchema = z.enum([
   'daily',
   'weekly',
   'monthly',
   'quarterly',
-  'yearly',
 ]);
 
 // ---------------------------------------------------------------------------

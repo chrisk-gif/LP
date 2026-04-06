@@ -11,8 +11,13 @@ export interface ExecutionResult {
   entityType?: string;
   entityId?: string;
   data?: Record<string, unknown>;
+  /** When true, the caller should surface confirmation UI instead of executing */
+  confirmationRequired?: boolean;
+  /** Fields that need user resolution before the write can proceed */
+  missingFields?: string[];
 }
 
+// ai_action_audit table columns (SQL canonical — no `success` column)
 interface AuditEntry {
   user_id: string;
   agent_name: string;
@@ -24,7 +29,117 @@ interface AuditEntry {
   confidence: number | null;
   auto_executed: boolean;
   confirmed_by_user: boolean;
-  success: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Write-normalization layer — validates required fields before DB execution
+// ---------------------------------------------------------------------------
+
+/** Tools that perform writes and require full normalization */
+const WRITE_TOOLS = new Set([
+  "create_task",
+  "create_event",
+  "complete_task",
+  "create_finance_item",
+  "mark_paid",
+  "log_workout",
+  "create_note",
+  "reschedule",
+]);
+
+/** Tools that are read-only and can skip normalization */
+export const READ_ONLY_TOOLS = new Set(["query_data"]);
+
+interface NormalizationResult {
+  ok: boolean;
+  input: Record<string, unknown>;
+  missing: string[];
+  message?: string;
+}
+
+/**
+ * Normalize and validate AI tool call input before execution.
+ * For write tools, ensures all SQL NOT NULL fields are resolvable.
+ * Returns one of:
+ *   - { ok: true, input: normalizedInput } — ready for DB execution
+ *   - { ok: false, missing: [...] } — confirmation required, fields unresolved
+ */
+export function normalizeToolCallInput(
+  toolName: string,
+  input: Record<string, unknown>
+): NormalizationResult {
+  // Read-only tools pass through
+  if (!WRITE_TOOLS.has(toolName)) {
+    return { ok: true, input, missing: [] };
+  }
+
+  const missing: string[] = [];
+  const normalized = { ...input };
+
+  switch (toolName) {
+    case "create_task": {
+      if (!normalized.title) missing.push("title");
+      // area_id is NOT NULL in SQL — area slug must be provided
+      if (!normalized.area) missing.push("area");
+      break;
+    }
+    case "create_event": {
+      if (!normalized.title) missing.push("title");
+      if (!normalized.start_time) missing.push("start_time");
+      // area_id is NOT NULL in SQL — area slug must be provided
+      if (!normalized.area) missing.push("area");
+      // end_time is NOT NULL in SQL — apply default rule: +60 minutes
+      if (!normalized.end_time && normalized.start_time && !normalized.all_day) {
+        try {
+          const start = new Date(normalized.start_time as string);
+          const end = new Date(start.getTime() + 60 * 60 * 1000);
+          normalized.end_time = end.toISOString();
+        } catch {
+          missing.push("end_time");
+        }
+      }
+      if (!normalized.end_time && !normalized.all_day) missing.push("end_time");
+      break;
+    }
+    case "create_finance_item": {
+      if (!normalized.title) missing.push("title");
+      if (!normalized.type) missing.push("type");
+      break;
+    }
+    case "log_workout": {
+      if (!normalized.title) missing.push("title");
+      break;
+    }
+    case "create_note": {
+      if (!normalized.title) missing.push("title");
+      if (!normalized.content) missing.push("content");
+      break;
+    }
+    case "complete_task": {
+      if (!normalized.task_title_search) missing.push("task_title_search");
+      break;
+    }
+    case "mark_paid": {
+      if (!normalized.search_term) missing.push("search_term");
+      break;
+    }
+    case "reschedule": {
+      if (!normalized.search_term) missing.push("search_term");
+      if (!normalized.new_date) missing.push("new_date");
+      break;
+    }
+  }
+
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      input: normalized,
+      missing,
+      message: `Mangler påkrevde felt: ${missing.join(", ")}`,
+    };
+  }
+
+  return { ok: true, input: normalized, missing: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -48,6 +163,9 @@ async function logAudit(
   entry: AuditEntry
 ): Promise<void> {
   try {
+    // ai_action_audit SQL columns: user_id, agent_name, action_type,
+    // entity_type, entity_id, input_data, output_data, confidence,
+    // auto_executed, confirmed_by_user, undone. No `success` column.
     await supabase.from("ai_action_audit").insert({
       user_id: entry.user_id,
       agent_name: entry.agent_name,
@@ -90,11 +208,12 @@ async function executeCreateTask(
   const title = input.title as string | undefined;
   if (!title) return fail("Mangler tittel for oppgaven.");
 
-  let areaId: string | null = null;
-  if (input.area) {
-    areaId = await resolveAreaId(supabase, input.area as string);
-    if (!areaId) return fail(`Fant ikke omr\u00e5det: ${input.area}`);
-  }
+  // area_id is NOT NULL in SQL — area slug must be provided and resolve
+  const areaSlug = input.area as string | undefined;
+  if (!areaSlug) return fail("Mangler område for oppgaven. Velg et område (f.eks. privat, jobb).");
+
+  const areaId = await resolveAreaId(supabase, areaSlug);
+  if (!areaId) return fail(`Fant ikke området: ${areaSlug}`);
 
   const { data, error } = await supabase
     .from("tasks")
@@ -126,10 +245,24 @@ async function executeCreateEvent(
   const startTime = input.start_time as string | undefined;
   if (!title || !startTime) return fail("Mangler tittel eller starttid.");
 
-  let areaId: string | null = null;
-  if (input.area) {
-    areaId = await resolveAreaId(supabase, input.area as string);
-    if (!areaId) return fail(`Fant ikke omr\u00e5det: ${input.area}`);
+  // area_id is NOT NULL in SQL — area slug must be provided and resolve
+  const areaSlug = input.area as string | undefined;
+  if (!areaSlug) return fail("Mangler område for hendelsen. Velg et område (f.eks. privat, jobb).");
+
+  const areaId = await resolveAreaId(supabase, areaSlug);
+  if (!areaId) return fail(`Fant ikke området: ${areaSlug}`);
+
+  // end_time is NOT NULL in SQL — normalization should have set a default
+  // but enforce here as a safety net
+  let endTime = input.end_time as string | undefined;
+  if (!endTime) {
+    // Default rule: +60 minutes from start_time
+    try {
+      const start = new Date(startTime);
+      endTime = new Date(start.getTime() + 60 * 60 * 1000).toISOString();
+    } catch {
+      return fail("Ugyldig starttid — kan ikke beregne sluttid.");
+    }
   }
 
   const { data, error } = await supabase
@@ -140,7 +273,7 @@ async function executeCreateEvent(
       description: (input.description as string) ?? null,
       area_id: areaId,
       start_time: startTime,
-      end_time: (input.end_time as string) ?? null,
+      end_time: endTime,
       all_day: (input.all_day as boolean) ?? false,
       location: (input.location as string) ?? null,
       event_type: (input.event_type as string) ?? "other",
@@ -169,9 +302,10 @@ async function executeCompleteTask(
 
   if (findErr || !task) return fail(`Fant ingen oppgave som matcher: ${search}`);
 
+  // tasks table has no completed_at column — only update status
   const { error } = await supabase
     .from("tasks")
-    .update({ status: "done", completed_at: new Date().toISOString() })
+    .update({ status: "done" })
     .eq("id", task.id);
 
   if (error) return fail(`Kunne ikke fullf\u00f8re oppgave: ${error.message}`);
@@ -415,12 +549,14 @@ async function executeQueryData(
       weekAgo.setDate(weekAgo.getDate() - 7);
       const weekAgoStr = weekAgo.toISOString();
 
+      // tasks has no completed_at column — use updated_at with status='done'
+      // to approximate "completed this week" (task was marked done recently)
       const [tasksRes, eventsRes, workoutsRes] = await Promise.all([
         supabase
           .from("tasks")
           .select("id", { count: "exact" })
           .eq("status", "done")
-          .gte("completed_at", weekAgoStr),
+          .gte("updated_at", weekAgoStr),
         supabase
           .from("events")
           .select("id", { count: "exact" })
@@ -587,7 +723,7 @@ export async function executeToolCall(
     result = fail(message);
   }
 
-  // Audit log
+  // Audit log (ai_action_audit has no `success` column)
   await logAudit(supabase, {
     user_id: userId,
     agent_name: "command-router",
@@ -595,11 +731,10 @@ export async function executeToolCall(
     entity_type: result.entityType ?? null,
     entity_id: result.entityId ?? null,
     input_data: input,
-    output_data: result.data ?? null,
+    output_data: result.data ?? { success: result.success, message: result.message },
     confidence: options?.confidence ?? null,
     auto_executed: options?.autoExecuted ?? false,
     confirmed_by_user: options?.confirmedByUser ?? false,
-    success: result.success,
   });
 
   return result;

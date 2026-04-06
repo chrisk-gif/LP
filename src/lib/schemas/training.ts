@@ -28,17 +28,18 @@ export const workoutIntensitySchema = z.enum([
 
 // ---------------------------------------------------------------------------
 // Create training plan
+// SQL columns: id, user_id, title, description, goal_id, start_date,
+//   end_date, status (training_status), created_at, updated_at
+// No plan_type, name, is_active, goal_description, or schedule columns.
 // ---------------------------------------------------------------------------
 
 export const createTrainingPlanSchema = z.object({
-  name: z.string().min(1, 'Name is required').max(500),
+  title: z.string().min(1, 'Title is required').max(500),
   description: z.string().max(5000).nullable().optional(),
-  plan_type: planTypeSchema,
+  goal_id: z.string().uuid().nullable().optional(),
   start_date: z.string().date().nullable().optional(),
   end_date: z.string().date().nullable().optional(),
-  goal_description: z.string().max(2000).nullable().optional(),
-  is_active: z.boolean().optional().default(true),
-  schedule: z.record(z.string(), z.unknown()).nullable().optional(),
+  status: z.enum(['active', 'completed', 'paused']).optional().default('active'),
 });
 
 export type CreateTrainingPlanInput = z.infer<typeof createTrainingPlanSchema>;
@@ -49,14 +50,12 @@ export type CreateTrainingPlanInput = z.infer<typeof createTrainingPlanSchema>;
 
 export const updateTrainingPlanSchema = z.object({
   id: z.string().uuid(),
-  name: z.string().min(1).max(500).optional(),
+  title: z.string().min(1).max(500).optional(),
   description: z.string().max(5000).nullable().optional(),
-  plan_type: planTypeSchema.optional(),
+  goal_id: z.string().uuid().nullable().optional(),
   start_date: z.string().date().nullable().optional(),
   end_date: z.string().date().nullable().optional(),
-  goal_description: z.string().max(2000).nullable().optional(),
-  is_active: z.boolean().optional(),
-  schedule: z.record(z.string(), z.unknown()).nullable().optional(),
+  status: z.enum(['active', 'completed', 'paused']).optional(),
 });
 
 export type UpdateTrainingPlanInput = z.infer<typeof updateTrainingPlanSchema>;

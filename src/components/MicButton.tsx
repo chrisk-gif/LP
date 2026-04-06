@@ -15,7 +15,8 @@ type PipelineState =
   | "listening"
   | "recording"
   | "processing"
-  | "executing";
+  | "executing"
+  | "confirming";
 
 interface CommandResponse {
   intent?: string;
@@ -47,10 +48,11 @@ export function MicButton() {
   const [aiResponse, setAiResponse] = useState<string | null>(null);
   const [aiSuccess, setAiSuccess] = useState<boolean | null>(null);
   const [hasBrowserSpeech, setHasBrowserSpeech] = useState<boolean>(false);
+  const [pendingToolCalls, setPendingToolCalls] = useState<
+    Array<{ name: string; input: Record<string, unknown> }> | null
+  >(null);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -78,7 +80,7 @@ export function MicButton() {
     [clearDismissTimer]
   );
 
-  // Send transcript to AI command endpoint
+  // Send transcript to AI command endpoint — same pipeline as assistant page
   const sendToAiCommand = useCallback(
     async (text: string) => {
       setState("executing");
@@ -100,10 +102,23 @@ export function MicButton() {
               "Feil ved behandling av kommando."
           );
           setAiSuccess(false);
+          setState("idle");
+          scheduleDismiss();
           return;
         }
 
         const data = (await res.json()) as CommandResponse;
+
+        // If confirmation is required, show confirmation UI instead of auto-executing
+        if (data.confirmationRequired && data.toolCalls && data.toolCalls.length > 0) {
+          setPendingToolCalls(data.toolCalls);
+          setAiResponse(data.response ?? "Bekreft handlingen nedenfor.");
+          setAiSuccess(null);
+          setState("confirming");
+          // Do NOT auto-dismiss while awaiting confirmation
+          return;
+        }
+
         setAiResponse(data.response ?? data.error ?? "Ingen respons.");
         setAiSuccess(
           !data.error &&
@@ -114,12 +129,47 @@ export function MicButton() {
         setAiResponse("Kunne ikke koble til AI-tjenesten.");
         setAiSuccess(false);
       } finally {
-        setState("idle");
-        scheduleDismiss();
+        // Only transition to idle if not in confirming state
+        setState((prev) => (prev === "confirming" ? prev : "idle"));
+        if (state !== "confirming") scheduleDismiss();
       }
     },
-    [scheduleDismiss]
+    [scheduleDismiss, state]
   );
+
+  // Confirm pending tool calls from global mic
+  const handleConfirm = useCallback(async () => {
+    if (!pendingToolCalls) return;
+    setState("executing");
+    try {
+      const res = await fetch("/api/ai/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true, pendingToolCalls }),
+      });
+      const data = (await res.json()) as CommandResponse;
+      setAiResponse(data.response ?? "Handlinger utført.");
+      setAiSuccess(
+        !data.error && (data.actions?.some((a) => a.status === "done") ?? false)
+      );
+    } catch {
+      setAiResponse("Bekreftelse feilet.");
+      setAiSuccess(false);
+    } finally {
+      setPendingToolCalls(null);
+      setState("idle");
+      scheduleDismiss();
+    }
+  }, [pendingToolCalls, scheduleDismiss]);
+
+  // Cancel pending confirmation
+  const handleCancel = useCallback(() => {
+    setPendingToolCalls(null);
+    setAiResponse("Handlingen ble avbrutt.");
+    setAiSuccess(null);
+    setState("idle");
+    scheduleDismiss(5000);
+  }, [scheduleDismiss]);
 
   // ---- Browser Speech Recognition path ----
   const startBrowserSpeech = useCallback(() => {
@@ -171,92 +221,9 @@ export function MicButton() {
     }
   }, []);
 
-  // ---- Fallback: audio recording + server transcribe ----
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "audio/webm;codecs=opus",
-      });
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        setState("processing");
-
-        try {
-          const formData = new FormData();
-          formData.append("audio", blob, "recording.webm");
-
-          const response = await fetch("/api/voice/transcribe", {
-            method: "POST",
-            body: formData,
-          });
-
-          if (response.status === 422) {
-            // No STT configured on server
-            setTranscript(
-              "Talegjenkjenning er ikke konfigurert p\u00e5 serveren. Bruk en nettleser med innebygd talegjenkjenning (Chrome, Edge)."
-            );
-            setState("idle");
-            scheduleDismiss(8000);
-            return;
-          }
-
-          if (!response.ok) {
-            setTranscript("Feil ved transkribering.");
-            setState("idle");
-            scheduleDismiss(5000);
-            return;
-          }
-
-          const data = (await response.json()) as {
-            transcript?: string;
-          };
-          const text = data.transcript;
-
-          if (text) {
-            setTranscript(text);
-            // Route through AI command
-            await sendToAiCommand(text);
-          } else {
-            setTranscript("Ingen tekst gjenkjent.");
-            setState("idle");
-            scheduleDismiss(5000);
-          }
-        } catch {
-          setTranscript("Kunne ikke koble til talegjenkjenning.");
-          setState("idle");
-          scheduleDismiss(5000);
-        }
-      };
-
-      mediaRecorder.start();
-      setState("recording");
-      setTranscript(null);
-      setAiResponse(null);
-      setAiSuccess(null);
-      clearDismissTimer();
-    } catch {
-      console.error("Mikrofon ikke tilgjengelig");
-      setState("idle");
-    }
-  }, [sendToAiCommand, scheduleDismiss, clearDismissTimer]);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === "recording") {
-      mediaRecorderRef.current.stop();
-    }
-  }, []);
+  // Server-side audio recording fallback is removed.
+  // When browser speech recognition is unavailable, we fail immediately
+  // and honestly — no fake recording → upload → 422 cycle.
 
   // ---- Click handler ----
   function handleClick() {
@@ -264,8 +231,9 @@ export function MicButton() {
       stopBrowserSpeech();
       return;
     }
-    if (state === "recording") {
-      stopRecording();
+    if (state === "confirming") {
+      // Clicking mic while confirming = cancel
+      handleCancel();
       return;
     }
     if (state !== "idle") return;
@@ -273,12 +241,19 @@ export function MicButton() {
     if (hasBrowserSpeech) {
       startBrowserSpeech();
     } else {
-      startRecording();
+      // No browser speech recognition available — fail immediately and honestly
+      // Do NOT start recording and upload to a dead server STT path
+      setTranscript(
+        "Talegjenkjenning er ikke tilgjengelig i denne nettleseren. Bruk Chrome eller Edge."
+      );
+      setAiSuccess(false);
+      scheduleDismiss(8000);
     }
   }
 
-  const isActive = state === "listening" || state === "recording";
+  const isActive = state === "listening";
   const isBusy = state === "processing" || state === "executing";
+  const isConfirming = state === "confirming";
 
   return (
     <div className="relative">
@@ -289,7 +264,7 @@ export function MicButton() {
             size="icon"
             onClick={handleClick}
             disabled={isBusy}
-            className={cn("relative", isActive && "text-destructive")}
+            className={cn("relative", (isActive || isConfirming) && "text-destructive")}
           >
             {isBusy ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -307,16 +282,20 @@ export function MicButton() {
                 ? "Stopp opptak"
                 : isBusy
                   ? "Behandler..."
-                  : "Start talekommando"}
+                  : isConfirming
+                    ? "Avbryt bekreftelse"
+                    : "Start talekommando"}
             </span>
           </Button>
         </TooltipTrigger>
         <TooltipContent>
           {isActive
-            ? "Klikk for \u00e5 stoppe"
+            ? "Klikk for å stoppe"
             : isBusy
               ? "Behandler tale..."
-              : "Talekommando"}
+              : isConfirming
+                ? "Avbryt"
+                : "Talekommando"}
         </TooltipContent>
       </Tooltip>
 
@@ -345,6 +324,23 @@ export function MicButton() {
                 </p>
               </div>
               <p>{aiResponse}</p>
+            </div>
+          )}
+          {/* Confirmation buttons — same semantics as assistant page */}
+          {isConfirming && pendingToolCalls && (
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleConfirm}
+                className="flex-1 rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground hover:bg-primary/90"
+              >
+                Bekreft
+              </button>
+              <button
+                onClick={handleCancel}
+                className="flex-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted"
+              >
+                Avbryt
+              </button>
             </div>
           )}
         </div>

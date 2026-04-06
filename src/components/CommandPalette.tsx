@@ -155,7 +155,7 @@ export function CommandPalette({ open, onOpenChange, onQuickAdd }: CommandPalett
                   <CommandItem
                     key={task.id}
                     value={`task-${task.id}-${task.title}`}
-                    onSelect={() => runCommand(() => router.push("/oppgaver"))}
+                    onSelect={() => runCommand(() => router.push(`/oppgaver?taskId=${task.id}`))}
                   >
                     <CheckSquare className="mr-2 h-4 w-4" />
                     <span className="flex-1">{task.title}</span>
@@ -173,7 +173,7 @@ export function CommandPalette({ open, onOpenChange, onQuickAdd }: CommandPalett
                   <CommandItem
                     key={event.id}
                     value={`event-${event.id}-${event.title}`}
-                    onSelect={() => runCommand(() => router.push("/kalender"))}
+                    onSelect={() => runCommand(() => router.push(`/kalender?eventId=${event.id}`))}
                   >
                     <Calendar className="mr-2 h-4 w-4" />
                     <span className="flex-1">{event.title}</span>
@@ -191,7 +191,7 @@ export function CommandPalette({ open, onOpenChange, onQuickAdd }: CommandPalett
                   <CommandItem
                     key={project.id}
                     value={`project-${project.id}-${project.title}`}
-                    onSelect={() => runCommand(() => router.push("/prosjekter"))}
+                    onSelect={() => runCommand(() => router.push(`/prosjekter?projectId=${project.id}`))}
                   >
                     <FolderKanban className="mr-2 h-4 w-4" />
                     <span className="flex-1">{project.title}</span>
@@ -209,7 +209,7 @@ export function CommandPalette({ open, onOpenChange, onQuickAdd }: CommandPalett
                   <CommandItem
                     key={note.id}
                     value={`note-${note.id}-${note.title}`}
-                    onSelect={() => runCommand(() => router.push("/logg"))}
+                    onSelect={() => runCommand(() => router.push(`/logg?noteId=${note.id}`))}
                   >
                     <FileText className="mr-2 h-4 w-4" />
                     <span className="flex-1">{note.title}</span>

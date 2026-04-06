@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 import { Settings, Download, Moon, Sun, Globe, Bell, Bot, Mic, Check, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -322,7 +323,7 @@ export default function SettingsPage() {
             <div>
               <Label>Talte svar</Label>
               <p className="text-sm text-muted-foreground">
-                Fa talte bekreftelser fra assistenten
+                Les opp AI-svar med nettleserens talesyntese nar stemmekommandoer brukes
               </p>
             </div>
             <Button
@@ -337,12 +338,10 @@ export default function SettingsPage() {
             <div>
               <Label>Stemmegjenkjenning</Label>
               <p className="text-sm text-muted-foreground">
-                Bruk nettleserens talegjenkjenning nar tilgjengelig
+                Bruker nettleserens innebygde talegjenkjenning (Chrome, Edge). Ingen serversidegjenkjenning konfigurert.
               </p>
             </div>
-            <Button variant="outline" size="sm" disabled>
-              Kommer snart
-            </Button>
+            <Badge variant="outline" className="text-xs">Nettleser</Badge>
           </div>
         </CardContent>
       </Card>

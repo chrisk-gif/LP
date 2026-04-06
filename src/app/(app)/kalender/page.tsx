@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   addDays,
   addWeeks,
@@ -332,6 +333,8 @@ export default function KalenderPage() {
     fetchData(dateRange);
   }, [dateRange, fetchData]);
 
+  // Deep-link: handled by EventDeepLinker component wrapped in Suspense below
+
   // Navigation
   function goNext() {
     switch (view) {
@@ -537,8 +540,41 @@ export default function KalenderPage() {
           setViewEvent(null);
         }}
       />
+
+      {/* Deep-link support: ?eventId=<uuid> opens event detail */}
+      <Suspense fallback={null}>
+        <EventDeepLinker events={events} onOpenEvent={setViewEvent} />
+      </Suspense>
     </div>
   );
+}
+
+// ==========================================================================
+// Deep-link handler (wrapped in Suspense in the parent)
+// ==========================================================================
+
+function EventDeepLinker({
+  events,
+  onOpenEvent,
+}: {
+  events: CalendarEvent[];
+  onOpenEvent: (event: CalendarEvent) => void;
+}) {
+  const searchParams = useSearchParams();
+  const handled = useRef(false);
+
+  useEffect(() => {
+    const eventId = searchParams.get("eventId");
+    if (eventId && events.length > 0 && !handled.current) {
+      const found = events.find((e) => e.id === eventId);
+      if (found) {
+        onOpenEvent(found);
+        handled.current = true;
+      }
+    }
+  }, [searchParams, events, onOpenEvent]);
+
+  return null;
 }
 
 // ==========================================================================

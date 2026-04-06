@@ -1,22 +1,75 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useEffect, useState, useCallback } from "react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Wallet, Plus, AlertCircle, CheckCircle, Clock, Receipt } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Wallet,
+  Plus,
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  Receipt,
+  Loader2,
+} from "lucide-react";
 
-// Demo data
-const financeItems = [
-  { id: "1", title: "Strøm - Tibber", type: "bill", amount: 2340, vendor: "Tibber", due_date: "2026-04-10", status: "due", category: "Bolig" },
-  { id: "2", title: "Internett - Telenor", type: "subscription", amount: 549, vendor: "Telenor", due_date: "2026-04-15", status: "upcoming", category: "Abonnement" },
-  { id: "3", title: "Forsikring - If", type: "bill", amount: 3200, vendor: "If Forsikring", due_date: "2026-04-01", status: "overdue", category: "Forsikring" },
-  { id: "4", title: "Netflix", type: "subscription", amount: 179, vendor: "Netflix", due_date: "2026-04-20", status: "upcoming", category: "Underholdning" },
-  { id: "5", title: "Spotify Family", type: "subscription", amount: 189, vendor: "Spotify", due_date: "2026-04-22", status: "upcoming", category: "Underholdning" },
-  { id: "6", title: "Husleie", type: "bill", amount: 12500, vendor: "Utleier", due_date: "2026-04-01", status: "paid", category: "Bolig" },
-  { id: "7", title: "Bilverksted - service", type: "receipt", amount: 4500, vendor: "Mekonomen", due_date: "2026-03-28", status: "paid", category: "Transport" },
-  { id: "8", title: "BSU-sparing", type: "savings", amount: 2083, vendor: "DNB", due_date: "2026-04-25", status: "upcoming", category: "Sparing" },
-];
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface FinanceItem {
+  id: string;
+  title: string;
+  description: string | null;
+  type: FinanceType;
+  status: FinanceStatus;
+  amount: number | null;
+  currency: string;
+  vendor: string | null;
+  category: string | null;
+  due_date: string | null;
+  paid_date: string | null;
+  recurrence_pattern: string | null;
+  reminder_days_before: number;
+  notes: string | null;
+  attachment_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+type FinanceType =
+  | "bill"
+  | "subscription"
+  | "receipt"
+  | "reimbursement"
+  | "savings"
+  | "investment"
+  | "other";
+
+type FinanceStatus = "upcoming" | "due" | "overdue" | "paid" | "archived";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 const formatNOK = (amount: number) =>
   new Intl.NumberFormat("nb-NO", {
@@ -25,7 +78,10 @@ const formatNOK = (amount: number) =>
     minimumFractionDigits: 0,
   }).format(amount);
 
-const statusConfig: Record<string, { label: string; color: string; icon: typeof Clock }> = {
+const statusConfig: Record<
+  FinanceStatus,
+  { label: string; color: string; icon: typeof Clock }
+> = {
   upcoming: { label: "Kommende", color: "bg-blue-100 text-blue-800", icon: Clock },
   due: { label: "Forfaller", color: "bg-yellow-100 text-yellow-800", icon: AlertCircle },
   overdue: { label: "Forfalt", color: "bg-red-100 text-red-800", icon: AlertCircle },
@@ -33,12 +89,107 @@ const statusConfig: Record<string, { label: string; color: string; icon: typeof 
   archived: { label: "Arkivert", color: "bg-gray-100 text-gray-800", icon: CheckCircle },
 };
 
+const typeLabels: Record<FinanceType, string> = {
+  bill: "Regning",
+  subscription: "Abonnement",
+  receipt: "Kvittering",
+  reimbursement: "Refusjon",
+  savings: "Sparing",
+  investment: "Investering",
+  other: "Annet",
+};
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
 export default function FinancePage() {
-  const unpaid = financeItems.filter((f) => !["paid", "archived"].includes(f.status));
-  const totalDue = unpaid.reduce((sum, f) => sum + f.amount, 0);
-  const overdue = financeItems.filter((f) => f.status === "overdue");
-  const thisMonth = financeItems.filter((f) => f.status === "paid");
-  const totalPaid = thisMonth.reduce((sum, f) => sum + f.amount, 0);
+  const [items, setItems] = useState<FinanceItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [markingPaid, setMarkingPaid] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const fetchItems = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetch("/api/finance");
+      if (!res.ok) throw new Error("Kunne ikke hente data");
+      const data: FinanceItem[] = await res.json();
+      setItems(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ukjent feil");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchItems();
+  }, [fetchItems]);
+
+  const handleMarkPaid = async (id: string) => {
+    setMarkingPaid(id);
+    try {
+      const res = await fetch("/api/finance", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status: "paid", paid_date: todayISO() }),
+      });
+      if (!res.ok) throw new Error("Kunne ikke oppdatere");
+      const updated: FinanceItem = await res.json();
+      setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    } catch {
+      // Silently fail – could add toast
+    } finally {
+      setMarkingPaid(null);
+    }
+  };
+
+  const handleCreate = async (data: Record<string, unknown>) => {
+    const res = await fetch("/api/finance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error("Kunne ikke opprette");
+    const created: FinanceItem = await res.json();
+    setItems((prev) => [...prev, created]);
+    setCreateOpen(false);
+  };
+
+  // Derived data
+  const unpaid = items.filter((f) => !["paid", "archived"].includes(f.status));
+  const totalDue = unpaid.reduce((sum, f) => sum + (f.amount ?? 0), 0);
+  const overdueItems = items.filter((f) => f.status === "overdue");
+  const paidItems = items.filter((f) => f.status === "paid");
+  const totalPaid = paidItems.reduce((sum, f) => sum + (f.amount ?? 0), 0);
+  const subscriptionCount = items.filter((f) => f.type === "subscription").length;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <AlertCircle className="h-8 w-8 text-destructive" />
+        <p className="text-muted-foreground">{error}</p>
+        <Button variant="outline" onClick={fetchItems}>
+          Prøv igjen
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -50,10 +201,15 @@ export default function FinancePage() {
           </h1>
           <p className="text-muted-foreground">Regninger, abonnementer og sparing</p>
         </div>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Ny post
-        </Button>
+        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              Ny post
+            </Button>
+          </DialogTrigger>
+          <CreateFinanceDialog onSubmit={handleCreate} />
+        </Dialog>
       </div>
 
       {/* Quick stats */}
@@ -66,7 +222,7 @@ export default function FinancePage() {
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <div className="text-2xl font-bold text-red-500">{overdue.length}</div>
+            <div className="text-2xl font-bold text-red-500">{overdueItems.length}</div>
             <p className="text-sm text-muted-foreground">Forfalt</p>
           </CardContent>
         </Card>
@@ -78,9 +234,7 @@ export default function FinancePage() {
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <div className="text-2xl font-bold">
-              {financeItems.filter((f) => f.type === "subscription").length}
-            </div>
+            <div className="text-2xl font-bold">{subscriptionCount}</div>
             <p className="text-sm text-muted-foreground">Abonnementer</p>
           </CardContent>
         </Card>
@@ -96,72 +250,276 @@ export default function FinancePage() {
         </TabsList>
 
         <TabsContent value="due" className="space-y-2 mt-4">
-          {financeItems
-            .filter((f) => ["due", "upcoming"].includes(f.status))
-            .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
-            .map((item) => (
-              <FinanceItemCard key={item.id} item={item} />
-            ))}
+          <FilteredList
+            items={items
+              .filter((f) => ["due", "upcoming"].includes(f.status))
+              .sort(
+                (a, b) =>
+                  new Date(a.due_date ?? "9999").getTime() -
+                  new Date(b.due_date ?? "9999").getTime()
+              )}
+            emptyMessage="Ingen kommende poster."
+            onMarkPaid={handleMarkPaid}
+            markingPaid={markingPaid}
+          />
         </TabsContent>
 
         <TabsContent value="overdue" className="space-y-2 mt-4">
-          {overdue.length === 0 ? (
-            <p className="text-muted-foreground">Ingen forfalte poster.</p>
-          ) : (
-            overdue.map((item) => <FinanceItemCard key={item.id} item={item} />)
-          )}
+          <FilteredList
+            items={overdueItems}
+            emptyMessage="Ingen forfalte poster."
+            onMarkPaid={handleMarkPaid}
+            markingPaid={markingPaid}
+          />
         </TabsContent>
 
         <TabsContent value="recurring" className="space-y-2 mt-4">
-          {financeItems
-            .filter((f) => f.type === "subscription")
-            .map((item) => <FinanceItemCard key={item.id} item={item} />)}
+          <FilteredList
+            items={items.filter((f) => f.type === "subscription")}
+            emptyMessage="Ingen faste utgifter registrert."
+            onMarkPaid={handleMarkPaid}
+            markingPaid={markingPaid}
+          />
         </TabsContent>
 
         <TabsContent value="receipts" className="space-y-2 mt-4">
-          {financeItems
-            .filter((f) => f.type === "receipt")
-            .map((item) => <FinanceItemCard key={item.id} item={item} />)}
+          <FilteredList
+            items={items.filter((f) => f.type === "receipt")}
+            emptyMessage="Ingen kvitteringer registrert."
+            onMarkPaid={handleMarkPaid}
+            markingPaid={markingPaid}
+          />
         </TabsContent>
 
         <TabsContent value="all" className="space-y-2 mt-4">
-          {financeItems.map((item) => (
-            <FinanceItemCard key={item.id} item={item} />
-          ))}
+          <FilteredList
+            items={items}
+            emptyMessage="Ingen poster registrert enda."
+            onMarkPaid={handleMarkPaid}
+            markingPaid={markingPaid}
+          />
         </TabsContent>
       </Tabs>
     </div>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Filtered list component
+// ---------------------------------------------------------------------------
+
+function FilteredList({
+  items,
+  emptyMessage,
+  onMarkPaid,
+  markingPaid,
+}: {
+  items: FinanceItem[];
+  emptyMessage: string;
+  onMarkPaid: (id: string) => void;
+  markingPaid: string | null;
+}) {
+  if (items.length === 0) {
+    return <p className="text-muted-foreground py-4 text-center">{emptyMessage}</p>;
+  }
+
+  return (
+    <>
+      {items.map((item) => (
+        <FinanceItemCard
+          key={item.id}
+          item={item}
+          onMarkPaid={onMarkPaid}
+          isMarking={markingPaid === item.id}
+        />
+      ))}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Finance item card
+// ---------------------------------------------------------------------------
+
 function FinanceItemCard({
   item,
+  onMarkPaid,
+  isMarking,
 }: {
-  item: (typeof financeItems)[0];
+  item: FinanceItem;
+  onMarkPaid: (id: string) => void;
+  isMarking: boolean;
 }) {
   const config = statusConfig[item.status];
+  const isPaid = item.status === "paid" || item.status === "archived";
+
   return (
-    <Card className="cursor-pointer hover:bg-accent/50">
-      <CardContent className="py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Receipt className="h-5 w-5 text-muted-foreground" />
-          <div>
-            <p className="font-medium">{item.title}</p>
-            <p className="text-sm text-muted-foreground">
-              {item.vendor} • {item.category}
+    <Card className="hover:bg-accent/50">
+      <CardContent className="py-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <Receipt className="h-5 w-5 text-muted-foreground shrink-0" />
+          <div className="min-w-0">
+            <p className="font-medium truncate">{item.title}</p>
+            <p className="text-sm text-muted-foreground truncate">
+              {item.vendor ? `${item.vendor} • ` : ""}
+              {item.category ?? typeLabels[item.type]}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="font-semibold">{formatNOK(item.amount)}</span>
+        <div className="flex items-center gap-3 shrink-0">
+          {!isPaid && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-green-600 hover:text-green-700 hover:bg-green-50"
+              disabled={isMarking}
+              onClick={() => onMarkPaid(item.id)}
+            >
+              {isMarking ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle className="h-4 w-4 mr-1" />
+              )}
+              Merk som betalt
+            </Button>
+          )}
+          <span className="font-semibold">
+            {item.amount != null ? formatNOK(item.amount) : "-"}
+          </span>
           <Badge className={config.color} variant="outline">
             {config.label}
           </Badge>
-          <span className="text-sm text-muted-foreground">
-            {new Date(item.due_date).toLocaleDateString("nb-NO")}
-          </span>
+          {item.due_date && (
+            <span className="text-sm text-muted-foreground">
+              {new Date(item.due_date).toLocaleDateString("nb-NO")}
+            </span>
+          )}
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Create finance dialog
+// ---------------------------------------------------------------------------
+
+function CreateFinanceDialog({
+  onSubmit,
+}: {
+  onSubmit: (data: Record<string, unknown>) => Promise<void>;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setFormError(null);
+
+    const formData = new FormData(e.currentTarget);
+    const title = formData.get("title") as string;
+    const type = formData.get("type") as string;
+    const amountStr = formData.get("amount") as string;
+    const vendor = formData.get("vendor") as string;
+    const category = formData.get("category") as string;
+    const dueDate = formData.get("due_date") as string;
+
+    if (!title.trim()) {
+      setFormError("Tittel er påkrevd");
+      setSubmitting(false);
+      return;
+    }
+
+    const payload: Record<string, unknown> = {
+      title: title.trim(),
+      type,
+      status: "upcoming",
+    };
+
+    if (amountStr) payload.amount = parseFloat(amountStr);
+    if (vendor) payload.vendor = vendor;
+    if (category) payload.category = category;
+    if (dueDate) payload.due_date = dueDate;
+
+    try {
+      await onSubmit(payload);
+    } catch {
+      setFormError("Kunne ikke opprette post. Prøv igjen.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Ny økonomipost</DialogTitle>
+      </DialogHeader>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="title">Tittel</Label>
+          <Input id="title" name="title" placeholder="F.eks. Strøm - Tibber" required />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="type">Type</Label>
+            <Select name="type" defaultValue="bill">
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bill">Regning</SelectItem>
+                <SelectItem value="subscription">Abonnement</SelectItem>
+                <SelectItem value="receipt">Kvittering</SelectItem>
+                <SelectItem value="reimbursement">Refusjon</SelectItem>
+                <SelectItem value="savings">Sparing</SelectItem>
+                <SelectItem value="investment">Investering</SelectItem>
+                <SelectItem value="other">Annet</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="amount">Beløp (kr)</Label>
+            <Input
+              id="amount"
+              name="amount"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="0"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="vendor">Leverandør</Label>
+            <Input id="vendor" name="vendor" placeholder="F.eks. Tibber" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="category">Kategori</Label>
+            <Input id="category" name="category" placeholder="F.eks. Bolig" />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="due_date">Forfallsdato</Label>
+          <Input id="due_date" name="due_date" type="date" />
+        </div>
+
+        {formError && (
+          <p className="text-sm text-destructive">{formError}</p>
+        )}
+
+        <DialogFooter>
+          <Button type="submit" disabled={submitting}>
+            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Opprett
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
   );
 }

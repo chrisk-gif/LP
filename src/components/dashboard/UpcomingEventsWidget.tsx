@@ -1,19 +1,21 @@
-'use client'
-
 import Link from 'next/link'
 import { CalendarDays, ChevronRight } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent, CardAction } from '@/components/ui/card'
+import { createServerSupabaseClient } from '@/lib/supabase/server'
 
-// DEMO DATA - Replace with API call
-const DEMO_EVENTS = [
-  { id: '1', title: 'Prosjektmote Byasentunnelen', time: '09:00', location: 'Teams' },
-  { id: '2', title: 'Lunsj med Kjetil (SVV)', time: '11:30', location: 'Olivia Aker Brygge' },
-  { id: '3', title: 'Intern tilbudsgjennomgang', time: '13:00', location: 'Rom 3.14' },
-  { id: '4', title: 'Trening - styrke', time: '16:30', location: 'SATS Nydalen' },
-  { id: '5', title: 'Middag med familien', time: '18:00', location: 'Hjemme' },
-]
+export async function UpcomingEventsWidget() {
+  const supabase = await createServerSupabaseClient()
+  const now = new Date().toISOString()
 
-export function UpcomingEventsWidget() {
+  const { data: events } = await supabase
+    .from('events')
+    .select('id, title, start_time, location')
+    .gte('start_time', now)
+    .order('start_time', { ascending: true })
+    .limit(5)
+
+  const items = events ?? []
+
   return (
     <Link href="/kalender" className="block">
       <Card className="transition-shadow hover:shadow-md h-full">
@@ -27,17 +29,29 @@ export function UpcomingEventsWidget() {
           </CardAction>
         </CardHeader>
         <CardContent className="space-y-3">
-          {DEMO_EVENTS.map((event) => (
-            <div key={event.id} className="flex items-start gap-3">
-              <span className="font-mono text-xs text-muted-foreground w-11 shrink-0 pt-0.5">
-                {event.time}
-              </span>
-              <div className="min-w-0">
-                <p className="text-sm leading-snug truncate">{event.title}</p>
-                <p className="text-xs text-muted-foreground truncate">{event.location}</p>
-              </div>
-            </div>
-          ))}
+          {items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Ingen kommende hendelser</p>
+          ) : (
+            items.map((event) => {
+              const time = new Date(event.start_time).toLocaleTimeString('nb-NO', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+              return (
+                <div key={event.id} className="flex items-start gap-3">
+                  <span className="font-mono text-xs text-muted-foreground w-11 shrink-0 pt-0.5">
+                    {time}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm leading-snug truncate">{event.title}</p>
+                    {event.location && (
+                      <p className="text-xs text-muted-foreground truncate">{event.location}</p>
+                    )}
+                  </div>
+                </div>
+              )
+            })
+          )}
         </CardContent>
       </Card>
     </Link>

@@ -1,18 +1,27 @@
 // =============================================================================
 // Livsplanlegg – Inbox Zod Schemas
+// Aligned with SQL enums in 00001_initial_schema.sql
 // =============================================================================
 
 import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
-// Shared enum schemas
+// Shared enum schemas (match SQL exactly)
 // ---------------------------------------------------------------------------
+
+export const inboxItemTypeSchema = z.enum([
+  'task',
+  'idea',
+  'note',
+  'bill',
+  'event',
+  'training',
+  'voice_memo',
+]);
 
 export const inboxSourceSchema = z.enum([
   'manual',
   'voice',
-  'email',
-  'api',
   'ai',
 ]);
 
@@ -22,10 +31,10 @@ export const inboxSourceSchema = z.enum([
 
 export const createInboxItemSchema = z.object({
   content: z.string().min(1, 'Content is required').max(10000),
+  item_type: inboxItemTypeSchema.nullable().optional(),
+  area_id: z.string().uuid().nullable().optional(),
   source: inboxSourceSchema.optional().default('manual'),
-  raw_input: z.string().max(50000).nullable().optional(),
-  parsed_data: z.record(z.string(), z.unknown()).nullable().optional(),
-  is_processed: z.boolean().optional().default(false),
+  raw_transcript: z.string().max(50000).nullable().optional(),
 });
 
 export type CreateInboxItemInput = z.infer<typeof createInboxItemSchema>;
@@ -35,27 +44,11 @@ export type CreateInboxItemInput = z.infer<typeof createInboxItemSchema>;
 // ---------------------------------------------------------------------------
 
 export const updateInboxItemSchema = z.object({
-  id: z.string().uuid(),
   content: z.string().min(1).max(10000).optional(),
-  source: inboxSourceSchema.optional(),
-  raw_input: z.string().max(50000).nullable().optional(),
-  parsed_data: z.record(z.string(), z.unknown()).nullable().optional(),
-  is_processed: z.boolean().optional(),
+  item_type: inboxItemTypeSchema.nullable().optional(),
+  area_id: z.string().uuid().nullable().optional(),
+  processed: z.boolean().optional(),
   processed_at: z.string().datetime().nullable().optional(),
-  result_type: z.string().max(100).nullable().optional(),
-  result_id: z.string().uuid().nullable().optional(),
 });
 
 export type UpdateInboxItemInput = z.infer<typeof updateInboxItemSchema>;
-
-// ---------------------------------------------------------------------------
-// Process inbox item (convert to task/event/note)
-// ---------------------------------------------------------------------------
-
-export const processInboxItemSchema = z.object({
-  id: z.string().uuid(),
-  result_type: z.enum(['task', 'event', 'note', 'goal', 'finance_item']),
-  result_id: z.string().uuid(),
-});
-
-export type ProcessInboxItemInput = z.infer<typeof processInboxItemSchema>;

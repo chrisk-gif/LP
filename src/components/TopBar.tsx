@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -31,6 +32,13 @@ import {
   Moon,
   Sun,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+
+interface UserProfile {
+  displayName: string;
+  avatarUrl: string | null;
+  initials: string;
+}
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -40,11 +48,59 @@ function getGreeting(): string {
   return "God kveld";
 }
 
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
 export function TopBar() {
+  const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [profile, setProfile] = useState<UserProfile>({
+    displayName: "",
+    avatarUrl: null,
+    initials: "",
+  });
+
+  useEffect(() => {
+    async function fetchProfile() {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data } = await supabase
+        .from("profiles")
+        .select("display_name, avatar_url")
+        .eq("id", user.id)
+        .single();
+
+      if (data) {
+        const name = data.display_name || user.email || "Bruker";
+        setProfile({
+          displayName: name,
+          avatarUrl: data.avatar_url,
+          initials: getInitials(name),
+        });
+      }
+    }
+    fetchProfile();
+  }, []);
+
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
 
   function toggleDarkMode() {
     const next = !darkMode;
@@ -72,7 +128,8 @@ export function TopBar() {
         {/* Greeting */}
         <div className="hidden sm:block">
           <p className="text-sm font-medium text-foreground">
-            {getGreeting()}, Christian
+            {getGreeting()}
+            {profile.displayName ? `, ${profile.displayName}` : ""}
           </p>
         </div>
 
@@ -85,7 +142,7 @@ export function TopBar() {
           onClick={() => setCommandOpen(true)}
         >
           <Search className="h-4 w-4" />
-          <span className="text-sm">Søk...</span>
+          <span className="text-sm">Sok...</span>
           <kbd className="ml-auto pointer-events-none inline-flex h-5 items-center gap-1 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
             Ctrl+K
           </kbd>
@@ -99,7 +156,7 @@ export function TopBar() {
           onClick={() => setCommandOpen(true)}
         >
           <Search className="h-5 w-5" />
-          <span className="sr-only">Søk</span>
+          <span className="sr-only">Sok</span>
         </Button>
 
         {/* Quick Add */}
@@ -131,26 +188,34 @@ export function TopBar() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="rounded-full">
               <Avatar className="h-8 w-8">
-                <AvatarImage src="" alt="Christian" />
+                <AvatarImage
+                  src={profile.avatarUrl ?? ""}
+                  alt={profile.displayName}
+                />
                 <AvatarFallback className="text-xs bg-primary text-primary-foreground">
-                  CK
+                  {profile.initials || "?"}
                 </AvatarFallback>
               </Avatar>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel>Christian Kyllingstad</DropdownMenuLabel>
+            <DropdownMenuLabel>
+              {profile.displayName || "Laster..."}
+            </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push("/innstillinger")}>
               <User className="mr-2 h-4 w-4" />
               Profil
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push("/innstillinger")}>
               <Settings className="mr-2 h-4 w-4" />
               Innstillinger
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive">
+            <DropdownMenuItem
+              className="text-destructive"
+              onClick={handleLogout}
+            >
               <LogOut className="mr-2 h-4 w-4" />
               Logg ut
             </DropdownMenuItem>

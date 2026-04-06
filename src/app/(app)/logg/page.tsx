@@ -1,36 +1,26 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BookOpen, Plus, Star, AlertTriangle, Lightbulb, ArrowRight } from "lucide-react";
+import { BookOpen, Plus, Star, AlertTriangle, Lightbulb, ArrowRight, Loader2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
-// Demo data
-const reviews = [
-  {
-    id: "1",
-    period: "weekly",
-    period_start: "2026-03-30",
-    period_end: "2026-04-05",
-    wins: "Levert E6-tilbud på tid. Fullført nettside-redesign for ytly.no. 3 treningsøkter.",
-    blockers: "Venter på tilbakemelding fra Rogaland FK. Forsikring ikke betalt.",
-    lessons_learned: "Bør starte prismatrise tidligere i tilbudsprosessen.",
-    next_focus: "Ferdigstille Byåsentunnelen-tilbud. Betale forfalte regninger. Planlegge uka mer strukturert.",
-    ai_generated: false,
-  },
-  {
-    id: "2",
-    period: "daily",
-    period_start: "2026-04-04",
-    period_end: "2026-04-04",
-    wins: "God styrketreningsøkt. Fikset bug på ytly.no.",
-    blockers: "Møtet med byggherre ble utsatt.",
-    lessons_learned: "Sett av buffer for uforutsette endringer.",
-    next_focus: "Prismatrise Byåsentunnelen. Handle dagligvarer.",
-    ai_generated: false,
-  },
-];
+interface Review {
+  id: string;
+  period: string;
+  period_start: string;
+  period_end: string;
+  wins: string | null;
+  blockers: string | null;
+  lessons_learned: string | null;
+  next_focus: string | null;
+  freeform_notes: string | null;
+  ai_generated: boolean;
+  created_at: string;
+}
 
 const periodLabels: Record<string, string> = {
   daily: "Daglig",
@@ -40,6 +30,48 @@ const periodLabels: Record<string, string> = {
 };
 
 export default function ReviewsPage() {
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchData() {
+      const supabase = createClient();
+
+      const { data, error: fetchError } = await supabase
+        .from("reviews")
+        .select("*")
+        .order("period_start", { ascending: false });
+
+      if (fetchError) {
+        setError("Kunne ikke hente gjennomganger: " + fetchError.message);
+        setLoading(false);
+        return;
+      }
+
+      setReviews(data ?? []);
+      setLoading(false);
+    }
+
+    fetchData();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <p className="text-destructive">{error}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -65,22 +97,27 @@ export default function ReviewsPage() {
         </TabsList>
 
         <TabsContent value="all" className="space-y-4 mt-4">
-          {reviews.map((review) => (
-            <ReviewCard key={review.id} review={review} />
-          ))}
+          {reviews.length === 0 ? (
+            <p className="text-muted-foreground">Ingen gjennomganger ennå. Opprett din første for å komme i gang.</p>
+          ) : (
+            reviews.map((review) => (
+              <ReviewCard key={review.id} review={review} />
+            ))
+          )}
         </TabsContent>
 
         {["daily", "weekly", "monthly"].map((period) => (
           <TabsContent key={period} value={period} className="space-y-4 mt-4">
-            {reviews
-              .filter((r) => r.period === period)
-              .map((review) => (
-                <ReviewCard key={review.id} review={review} />
-              ))}
-            {reviews.filter((r) => r.period === period).length === 0 && (
+            {reviews.filter((r) => r.period === period).length === 0 ? (
               <p className="text-muted-foreground">
                 Ingen {periodLabels[period].toLowerCase()} gjennomganger ennå.
               </p>
+            ) : (
+              reviews
+                .filter((r) => r.period === period)
+                .map((review) => (
+                  <ReviewCard key={review.id} review={review} />
+                ))
             )}
           </TabsContent>
         ))}
@@ -89,13 +126,13 @@ export default function ReviewsPage() {
   );
 }
 
-function ReviewCard({ review }: { review: (typeof reviews)[0] }) {
+function ReviewCard({ review }: { review: Review }) {
   return (
     <Card className="cursor-pointer hover:shadow-md transition-shadow">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg">
-            {periodLabels[review.period]} gjennomgang
+            {periodLabels[review.period] ?? review.period} gjennomgang
           </CardTitle>
           <Badge variant="outline">
             {new Date(review.period_start).toLocaleDateString("nb-NO")}

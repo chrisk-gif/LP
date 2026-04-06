@@ -18,13 +18,18 @@ export async function POST(request: NextRequest) {
 
     // If browser already provided a transcript, use it directly
     if (browserTranscript) {
-      // Log the voice command
-      await supabase.from("voice_commands").insert({
-        user_id: user.id,
-        raw_transcript: browserTranscript,
-        normalized_transcript: browserTranscript,
-        language: "nb-NO",
-      });
+      // Log the voice command (best-effort)
+      try {
+        await supabase.from("voice_commands").insert({
+          user_id: user.id,
+          raw_transcript: browserTranscript,
+          normalized_transcript: browserTranscript,
+          language: "nb-NO",
+          source: "browser",
+        });
+      } catch {
+        console.error("Failed to log voice command");
+      }
 
       return NextResponse.json({
         transcript: browserTranscript,
@@ -35,13 +40,13 @@ export async function POST(request: NextRequest) {
     // Fallback: upload audio file and use server-side transcription
     if (!audioFile) {
       return NextResponse.json(
-        { error: "No audio file or transcript provided" },
+        { error: "Ingen lydfil eller transkripsjon mottatt." },
         { status: 400 }
       );
     }
 
-    // Upload audio to Supabase storage for audit
-    const fileName = `voice-${user.id}-${Date.now()}.webm`;
+    // Upload audio to Supabase storage for audit (user-scoped path)
+    const fileName = `${user.id}/voice-${Date.now()}.webm`;
     const { error: uploadError } = await supabase.storage
       .from("voice-audio")
       .upload(fileName, audioFile, {
@@ -50,6 +55,7 @@ export async function POST(request: NextRequest) {
 
     if (uploadError) {
       console.error("Audio upload error:", uploadError);
+      // Non-fatal: continue even if storage upload fails
     }
 
     // STT provider abstraction
@@ -59,7 +65,8 @@ export async function POST(request: NextRequest) {
       // No server-side transcription available
       return NextResponse.json(
         {
-          error: "Server-side transcription not configured. Use browser speech recognition.",
+          error:
+            "Talegjenkjenning p\u00e5 server er ikke konfigurert. Bruk en nettleser med innebygd talegjenkjenning (Chrome, Edge).",
           source: "none",
         },
         { status: 422 }
@@ -71,7 +78,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       {
-        error: "STT provider not implemented: " + sttProvider,
+        error: `STT-leverand\u00f8r ikke implementert: ${sttProvider}`,
         source: "none",
       },
       { status: 501 }
@@ -79,7 +86,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Voice transcription error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Intern serverfeil ved talebehandling." },
       { status: 500 }
     );
   }

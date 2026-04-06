@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -36,7 +36,11 @@ import {
   CreditCard,
   Dumbbell,
   Inbox,
+  Loader2,
+  Check,
+  AlertCircle,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 const itemTypes = [
   { value: "task", label: "Oppgave", icon: CheckSquare },
@@ -47,56 +51,194 @@ const itemTypes = [
   { value: "inbox", label: "Innboks", icon: Inbox },
 ] as const;
 
-const areas = [
-  { value: "asplan-viak", label: "Asplan Viak" },
-  { value: "ytly", label: "ytly.no" },
-  { value: "privat", label: "Privat" },
-  { value: "trening", label: "Trening" },
-  { value: "okonomi", label: "Økonomi" },
-] as const;
+interface Area {
+  id: string;
+  name: string;
+  slug: string;
+}
 
 interface QuickAddProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
+type SubmitStatus = "idle" | "submitting" | "success" | "error";
+
 export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
   const [type, setType] = useState<string>("task");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [area, setArea] = useState<string>("");
+  const [areaId, setAreaId] = useState<string>("");
   const [dueDate, setDueDate] = useState<Date | undefined>();
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [areasLoading, setAreasLoading] = useState(false);
+  const [status, setStatus] = useState<SubmitStatus>("idle");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const supabase = createClient();
+
+  // Fetch areas when dialog opens
+  useEffect(() => {
+    if (!open) return;
+    async function fetchAreas() {
+      setAreasLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("areas")
+          .select("id, name, slug")
+          .order("name");
+        if (error) throw error;
+        setAreas(data ?? []);
+      } catch (err) {
+        console.error("Failed to fetch areas:", err);
+      } finally {
+        setAreasLoading(false);
+      }
+    }
+    fetchAreas();
+  }, [open]);
 
   function resetForm() {
     setType("task");
     setTitle("");
     setDescription("");
-    setArea("");
+    setAreaId("");
     setDueDate(undefined);
+    setStatus("idle");
+    setErrorMessage("");
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
 
-    // TODO: dispatch to appropriate API based on type
-    const payload = {
-      type,
-      title: title.trim(),
-      description: description.trim() || undefined,
-      area: area || undefined,
-      due_date: dueDate?.toISOString() || undefined,
-    };
+    // Validate area is selected for types that require it
+    if (["task", "event"].includes(type) && !areaId) {
+      setStatus("error");
+      setErrorMessage("Velg et omrade for denne typen.");
+      return;
+    }
 
-    console.log("Quick add:", payload);
+    setStatus("submitting");
+    setErrorMessage("");
 
-    resetForm();
-    onOpenChange(false);
+    try {
+      const trimmedTitle = title.trim();
+      const trimmedDesc = description.trim() || undefined;
+
+      switch (type) {
+        case "task": {
+          const res = await fetch("/api/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: trimmedTitle,
+              description: trimmedDesc ?? null,
+              area_id: areaId,
+              due_date: dueDate ? format(dueDate, "yyyy-MM-dd") : null,
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || "Kunne ikke opprette oppgave");
+          }
+          break;
+        }
+
+        case "event": {
+          // Build start_time from dueDate, default to 09:00 today if no date selected
+          const eventDate = dueDate ?? new Date();
+          const startTime = new Date(eventDate);
+          startTime.setHours(9, 0, 0, 0);
+          const endTime = new Date(startTime);
+          endTime.setHours(startTime.getHours() + 1);
+
+          const res = await fetch("/api/events", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: trimmedTitle,
+              description: trimmedDesc ?? null,
+              area_id: areaId,
+              start_time: startTime.toISOString(),
+              end_time: endTime.toISOString(),
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || "Kunne ikke opprette hendelse");
+          }
+          break;
+        }
+
+        case "note": {
+          const { error } = await supabase.from("notes").insert({
+            title: trimmedTitle,
+            content: trimmedDesc ?? null,
+            area_id: areaId || null,
+          });
+          if (error) throw new Error(error.message);
+          break;
+        }
+
+        case "bill": {
+          const res = await fetch("/api/finance", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: trimmedTitle,
+              description: trimmedDesc ?? null,
+              type: "bill",
+              due_date: dueDate ? format(dueDate, "yyyy-MM-dd") : null,
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || "Kunne ikke opprette regning");
+          }
+          break;
+        }
+
+        case "workout": {
+          const { error } = await supabase.from("workout_sessions").insert({
+            title: trimmedTitle,
+            notes: trimmedDesc ?? null,
+            session_date: dueDate
+              ? format(dueDate, "yyyy-MM-dd")
+              : format(new Date(), "yyyy-MM-dd"),
+          });
+          if (error) throw new Error(error.message);
+          break;
+        }
+
+        case "inbox": {
+          const { error } = await supabase.from("inbox_items").insert({
+            title: trimmedTitle,
+            raw_text: trimmedDesc ?? null,
+          });
+          if (error) throw new Error(error.message);
+          break;
+        }
+
+        default:
+          throw new Error(`Ukjent type: ${type}`);
+      }
+
+      setStatus("success");
+      setTimeout(() => {
+        resetForm();
+        onOpenChange(false);
+      }, 600);
+    } catch (err) {
+      setStatus("error");
+      setErrorMessage(err instanceof Error ? err.message : "Noe gikk galt");
+    }
   }
 
   const selectedType = itemTypes.find((t) => t.value === type);
   const TypeIcon = selectedType?.icon ?? CheckSquare;
+  const requiresArea = ["task", "event"].includes(type);
 
   return (
     <Dialog
@@ -126,7 +268,11 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
                   variant={type === item.value ? "default" : "outline"}
                   size="sm"
                   className="gap-1.5"
-                  onClick={() => setType(item.value)}
+                  onClick={() => {
+                    setType(item.value);
+                    setStatus("idle");
+                    setErrorMessage("");
+                  }}
                 >
                   <Icon className="h-3.5 w-3.5" />
                   {item.label}
@@ -163,15 +309,18 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
 
           {/* Area selector */}
           <div className="space-y-2">
-            <Label>Område</Label>
-            <Select value={area} onValueChange={setArea}>
+            <Label>
+              Omrade
+              {requiresArea && <span className="text-destructive ml-0.5">*</span>}
+            </Label>
+            <Select value={areaId} onValueChange={setAreaId}>
               <SelectTrigger>
-                <SelectValue placeholder="Velg område..." />
+                <SelectValue placeholder={areasLoading ? "Laster..." : "Velg omrade..."} />
               </SelectTrigger>
               <SelectContent>
                 {areas.map((a) => (
-                  <SelectItem key={a.value} value={a.value}>
-                    {a.label}
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -214,6 +363,20 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
             </div>
           )}
 
+          {/* Feedback */}
+          {status === "error" && errorMessage && (
+            <div className="flex items-center gap-2 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              {errorMessage}
+            </div>
+          )}
+          {status === "success" && (
+            <div className="flex items-center gap-2 text-sm text-green-600">
+              <Check className="h-4 w-4 shrink-0" />
+              Lagt til!
+            </div>
+          )}
+
           <DialogFooter>
             <Button
               type="button"
@@ -225,7 +388,13 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
             >
               Avbryt
             </Button>
-            <Button type="submit" disabled={!title.trim()}>
+            <Button
+              type="submit"
+              disabled={!title.trim() || status === "submitting" || status === "success"}
+            >
+              {status === "submitting" && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
               Legg til
             </Button>
           </DialogFooter>

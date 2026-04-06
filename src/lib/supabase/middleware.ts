@@ -29,12 +29,16 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Redirect to login if not authenticated (except for auth pages)
-  const isAuthPage =
-    request.nextUrl.pathname.startsWith("/login") ||
-    request.nextUrl.pathname.startsWith("/auth");
+  const pathname = request.nextUrl.pathname;
 
-  if (!user && !isAuthPage) {
+  // Auth pages: /login and /auth/*
+  const isAuthPage =
+    pathname.startsWith("/login") || pathname.startsWith("/auth");
+
+  // API routes: return 401 JSON instead of redirecting
+  const isApiRoute = pathname.startsWith("/api");
+
+  if (!user && !isAuthPage && !isApiRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

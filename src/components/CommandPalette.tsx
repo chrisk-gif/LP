@@ -115,14 +115,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         {/* Navigation */}
         <CommandGroup heading="Navigasjon">
           <CommandItem
-            onSelect={() => runCommand(() => router.push("/dashboard"))}
+            onSelect={() => runCommand(() => router.push("/"))}
           >
             <LayoutDashboard className="mr-2 h-4 w-4" />
             Dashboard
             <ArrowRight className="ml-auto h-3 w-3 text-muted-foreground" />
           </CommandItem>
           <CommandItem
-            onSelect={() => runCommand(() => router.push("/i-dag"))}
+            onSelect={() => runCommand(() => router.push("/idag"))}
           >
             <CalendarCheck className="mr-2 h-4 w-4" />
             I dag
@@ -139,7 +139,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             <CheckSquare className="mr-2 h-4 w-4" />
             Oppgaver
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/mal"))}>
+          <CommandItem onSelect={() => runCommand(() => router.push("/maal"))}>
             <Target className="mr-2 h-4 w-4" />
             Mål
           </CommandItem>

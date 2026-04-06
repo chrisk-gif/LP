@@ -1,5 +1,3 @@
-'use client'
-
 import { TodayFocusWidget } from './TodayFocusWidget'
 import { UpcomingEventsWidget } from './UpcomingEventsWidget'
 import { OverdueWidget } from './OverdueWidget'

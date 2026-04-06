@@ -42,27 +42,19 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "I dag", href: "/i-dag", icon: CalendarCheck },
+  { label: "Dashboard", href: "/", icon: LayoutDashboard },
+  { label: "I dag", href: "/idag", icon: CalendarCheck },
   { label: "Kalender", href: "/kalender", icon: Calendar },
   { label: "Oppgaver", href: "/oppgaver", icon: CheckSquare },
-  { label: "Mål", href: "/mal", icon: Target },
+  { label: "Mål", href: "/maal", icon: Target },
   { label: "Prosjekter", href: "/prosjekter", icon: FolderKanban },
-  {
-    label: "Asplan Viak",
-    href: "/asplan-viak",
-    icon: Briefcase,
-    children: [
-      { label: "Tilbud", href: "/asplan-viak/tilbud" },
-      { label: "Oppgaver", href: "/asplan-viak/oppgaver" },
-    ],
-  },
+  { label: "Asplan Viak", href: "/asplan-viak", icon: Briefcase },
   { label: "ytly.no", href: "/ytly", icon: Rocket },
   { label: "Privat", href: "/privat", icon: Home },
   { label: "Økonomi", href: "/okonomi", icon: Wallet },
   { label: "Trening", href: "/trening", icon: Dumbbell },
   { label: "Logg & Refleksjon", href: "/logg", icon: BookOpen },
-  { label: "Innboks", href: "/innboks", icon: Inbox, badge: 3 },
+  { label: "Innboks", href: "/innboks", icon: Inbox },
   { label: "Assistent", href: "/assistent", icon: Bot },
 ];
 

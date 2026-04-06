@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { v4 as uuid } from "uuid";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   Plus,
   ArrowUpDown,
@@ -11,6 +10,7 @@ import {
   AlertTriangle,
   Clock,
   Repeat,
+  Loader2,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -31,131 +31,29 @@ import {
 import { TaskList } from "@/components/tasks/TaskList";
 import { TaskForm, type TaskFormValues } from "@/components/tasks/TaskForm";
 import type { TaskItemData } from "@/components/tasks/TaskItem";
-import { AREA_DEFAULTS, type AreaSlug } from "@/lib/constants";
 import { isOverdue, isToday, parseISO } from "@/lib/dates";
+import { createClient } from "@/lib/supabase/client";
 
 // ==========================================================================
-// Demo data
+// Types
 // ==========================================================================
 
-const TODAY = new Date().toISOString().split("T")[0];
-const YESTERDAY = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-const TOMORROW = new Date(Date.now() + 86400000).toISOString().split("T")[0];
-const NEXT_WEEK = new Date(Date.now() + 7 * 86400000)
-  .toISOString()
-  .split("T")[0];
-const LAST_WEEK = new Date(Date.now() - 5 * 86400000)
-  .toISOString()
-  .split("T")[0];
+interface Area {
+  id: string;
+  name: string;
+  slug: string;
+  color: string;
+}
 
-const INITIAL_TASKS: TaskItemData[] = [
-  {
-    id: uuid(),
-    title: "Ferdigstille prismatrise for Byasentunnelen",
-    description:
-      "Gjennomga alle enhetspriser og oppdater prismatrisen for byggherre.",
-    status: "in_progress",
-    priority: "critical",
-    due_date: TODAY,
-    estimated_minutes: 120,
-    tags: ["tilbud", "prioritert"],
-    area: { name: "Asplan Viak", slug: "asplan-viak", color: "#2563eb" },
-  },
-  {
-    id: uuid(),
-    title: "Sjekk status ytly.no nettside",
-    description: "Verifiser at alle endringer pa nettsiden er deployet korrekt.",
-    status: "todo",
-    priority: "high",
-    due_date: TODAY,
-    estimated_minutes: 30,
-    tags: ["nettside"],
-    area: { name: "ytly.no", slug: "ytly", color: "#7c3aed" },
-  },
-  {
-    id: uuid(),
-    title: "Handle dagligvarer",
-    description: "Melk, brod, gronnsaker, kylling.",
-    status: "todo",
-    priority: "low",
-    due_date: TODAY,
-    tags: ["handling"],
-    area: { name: "Privat", slug: "privat", color: "#059669" },
-  },
-  {
-    id: uuid(),
-    title: "Sende faktura til Rogaland fylkeskommune",
-    description: "Faktura for tilleggsarbeid januar-mars 2026.",
-    status: "todo",
-    priority: "high",
-    due_date: TOMORROW,
-    estimated_minutes: 45,
-    tags: ["faktura"],
-    area: { name: "Asplan Viak", slug: "asplan-viak", color: "#2563eb" },
-  },
-  {
-    id: uuid(),
-    title: "Oppdater manedlig budsjettsporing",
-    description: "For inn alle transaksjoner for mars.",
-    status: "todo",
-    priority: "medium",
-    due_date: LAST_WEEK,
-    estimated_minutes: 60,
-    tags: ["budsjett"],
-    area: { name: "Okonomi", slug: "okonomi", color: "#d97706" },
-  },
-  {
-    id: uuid(),
-    title: "Bestille time hos tannlegen",
-    status: "waiting",
-    priority: "low",
-    due_date: NEXT_WEEK,
-    area: { name: "Privat", slug: "privat", color: "#059669" },
-  },
-  {
-    id: uuid(),
-    title: "Treningsprogram: Uke 14",
-    description: "3x styrke, 2x loping, 1x mobilitet",
-    status: "todo",
-    priority: "medium",
-    due_date: NEXT_WEEK,
-    estimated_minutes: 360,
-    is_recurring: true,
-    tags: ["trening"],
-    area: { name: "Trening", slug: "trening", color: "#dc2626" },
-  },
-  {
-    id: uuid(),
-    title: "Klargjore presentasjon for oppstartsmate",
-    description: "PowerPoint for Byasentunnelen oppstartsmate med byggherre.",
-    status: "todo",
-    priority: "critical",
-    due_date: YESTERDAY,
-    estimated_minutes: 90,
-    tags: ["presentasjon"],
-    area: { name: "Asplan Viak", slug: "asplan-viak", color: "#2563eb" },
-  },
-  {
-    id: uuid(),
-    title: "Betale husleie",
-    status: "done",
-    priority: "high",
-    due_date: YESTERDAY,
-    area: { name: "Okonomi", slug: "okonomi", color: "#d97706" },
-    tags: ["fast-utgift"],
-    is_recurring: true,
-  },
-  {
-    id: uuid(),
-    title: "Ukentlig gjennomgang av innboks",
-    status: "todo",
-    priority: "medium",
-    due_date: TOMORROW,
-    estimated_minutes: 20,
-    is_recurring: true,
-    area: { name: "Privat", slug: "privat", color: "#059669" },
-  },
-];
+interface ProjectOption {
+  id: string;
+  title: string;
+}
+
+interface GoalOption {
+  id: string;
+  title: string;
+}
 
 // ==========================================================================
 // Sort helpers
@@ -182,9 +80,64 @@ function sortTasks(tasks: TaskItemData[], key: SortKey): TaskItemData[] {
       if (!b.due_date) return -1;
       return a.due_date.localeCompare(b.due_date);
     }
-    // created – just use the existing order (id based)
+    // created - use the existing order
     return 0;
   });
+}
+
+// ==========================================================================
+// API helpers
+// ==========================================================================
+
+async function fetchTasks(): Promise<TaskItemData[]> {
+  const res = await fetch("/api/tasks");
+  if (!res.ok) throw new Error("Kunne ikke hente oppgaver");
+  const data = await res.json();
+  // Map the joined `areas` relation to the flat `area` shape TaskItemData expects
+  return data.map((t: Record<string, unknown>) => ({
+    ...t,
+    area: t.areas ?? null,
+  }));
+}
+
+async function createTask(body: Record<string, unknown>): Promise<TaskItemData> {
+  const res = await fetch("/api/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: string }).error ?? "Kunne ikke opprette oppgave"
+    );
+  }
+  const t = await res.json();
+  return { ...t, area: t.areas ?? null };
+}
+
+async function patchTask(
+  id: string,
+  body: Record<string, unknown>
+): Promise<TaskItemData> {
+  const res = await fetch(`/api/tasks/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: string }).error ?? "Kunne ikke oppdatere oppgave"
+    );
+  }
+  const t = await res.json();
+  return { ...t, area: t.areas ?? null };
+}
+
+async function deleteTask(id: string): Promise<void> {
+  const res = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Kunne ikke slette oppgave");
 }
 
 // ==========================================================================
@@ -192,12 +145,77 @@ function sortTasks(tasks: TaskItemData[], key: SortKey): TaskItemData[] {
 // ==========================================================================
 
 export default function OppgaverPage() {
-  const [tasks, setTasks] = useState<TaskItemData[]>(INITIAL_TASKS);
+  const [tasks, setTasks] = useState<TaskItemData[]>([]);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [goals, setGoals] = useState<GoalOption[]>([]);
+  const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<SortKey>("priority");
   const [filterArea, setFilterArea] = useState<string>("alle");
   const [quickAdd, setQuickAdd] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskItemData | null>(null);
+
+  // -----------------------------------------------------------------------
+  // Data fetching
+  // -----------------------------------------------------------------------
+
+  const loadTasks = useCallback(async () => {
+    try {
+      const data = await fetchTasks();
+      setTasks(data);
+    } catch (err) {
+      console.error("Failed to load tasks:", err);
+    }
+  }, []);
+
+  const loadAreas = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("areas")
+        .select("id, name, slug, color")
+        .order("sort_order");
+      if (data) setAreas(data);
+    } catch (err) {
+      console.error("Failed to load areas:", err);
+    }
+  }, []);
+
+  const loadProjects = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("projects")
+        .select("id, title")
+        .order("title");
+      if (data) setProjects(data);
+    } catch (err) {
+      console.error("Failed to load projects:", err);
+    }
+  }, []);
+
+  const loadGoals = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("goals")
+        .select("id, title")
+        .order("title");
+      if (data) setGoals(data);
+    } catch (err) {
+      console.error("Failed to load goals:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    async function init() {
+      setLoading(true);
+      await Promise.all([loadTasks(), loadAreas(), loadProjects(), loadGoals()]);
+      setLoading(false);
+    }
+    init();
+  }, [loadTasks, loadAreas, loadProjects, loadGoals]);
 
   // -----------------------------------------------------------------------
   // Derived lists
@@ -211,6 +229,10 @@ export default function OppgaverPage() {
     return sortTasks(result, sortBy);
   }
 
+  const activeTasks = useMemo(
+    () => tasks.filter((t) => t.status !== "done" && t.status !== "archived"),
+    [tasks]
+  );
   const allTasks = useMemo(() => filtered(tasks), [tasks, sortBy, filterArea]);
   const todayTasks = useMemo(
     () =>
@@ -242,85 +264,103 @@ export default function OppgaverPage() {
   // Handlers
   // -----------------------------------------------------------------------
 
-  function handleToggle(id: string) {
+  async function handleToggle(id: string) {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+
+    const newStatus = task.status === "done" ? "todo" : "done";
+
+    // Optimistic update
     setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? { ...t, status: t.status === "done" ? "todo" : "done" }
-          : t
-      )
+      prev.map((t) => (t.id === id ? { ...t, status: newStatus } : t))
     );
+
+    try {
+      await patchTask(id, { status: newStatus });
+    } catch {
+      // Revert on failure
+      setTasks((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, status: task.status } : t))
+      );
+    }
   }
 
-  function handleQuickAdd(e: React.FormEvent) {
+  async function handleQuickAdd(e: React.FormEvent) {
     e.preventDefault();
     const title = quickAdd.trim();
     if (!title) return;
-    setTasks((prev) => [
-      {
-        id: uuid(),
-        title,
-        status: "todo",
-        priority: "medium",
-        due_date: TODAY,
-      },
-      ...prev,
-    ]);
-    setQuickAdd("");
-  }
 
-  function handleFormSubmit(values: TaskFormValues) {
-    const areaSlug = values.area_slug as AreaSlug;
-    const area = areaSlug
-      ? {
-          name: AREA_DEFAULTS[areaSlug]?.name ?? areaSlug,
-          slug: areaSlug,
-          color: AREA_DEFAULTS[areaSlug]?.color ?? "#6b7280",
-        }
-      : null;
+    // Use the first area as a default, or the filtered area
+    const defaultArea =
+      filterArea !== "alle"
+        ? areas.find((a) => a.slug === filterArea)
+        : areas[0];
 
-    if (editingTask) {
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === editingTask.id
-            ? {
-                ...t,
-                title: values.title,
-                description: values.description || null,
-                priority: values.priority,
-                due_date: values.due_date || null,
-                scheduled_date: values.scheduled_date || null,
-                scheduled_time: values.scheduled_time || null,
-                estimated_minutes: values.estimated_minutes
-                  ? parseInt(values.estimated_minutes, 10)
-                  : null,
-                tags: values.tags,
-                area,
-              }
-            : t
-        )
-      );
-    } else {
-      const newTask: TaskItemData = {
-        id: uuid(),
-        title: values.title,
-        description: values.description || null,
-        status: "todo",
-        priority: values.priority,
-        due_date: values.due_date || null,
-        scheduled_date: values.scheduled_date || null,
-        scheduled_time: values.scheduled_time || null,
-        estimated_minutes: values.estimated_minutes
-          ? parseInt(values.estimated_minutes, 10)
-          : null,
-        tags: values.tags,
-        area,
-      };
-      setTasks((prev) => [newTask, ...prev]);
+    if (!defaultArea) {
+      console.error("No area available for quick add");
+      return;
     }
 
-    setFormOpen(false);
-    setEditingTask(null);
+    setQuickAdd("");
+
+    try {
+      const newTask = await createTask({
+        title,
+        area_id: defaultArea.id,
+        status: "todo",
+        priority: "medium",
+        due_date: new Date().toISOString().split("T")[0],
+      });
+      setTasks((prev) => [newTask, ...prev]);
+    } catch (err) {
+      console.error("Quick add failed:", err);
+    }
+  }
+
+  async function handleFormSubmit(values: TaskFormValues) {
+    // Find the area by slug to get its UUID
+    const area = areas.find((a) => a.slug === values.area_slug);
+    if (!area) {
+      console.error("No area selected");
+      return;
+    }
+
+    const payload: Record<string, unknown> = {
+      title: values.title,
+      description: values.description || null,
+      area_id: area.id,
+      priority: values.priority,
+      due_date: values.due_date || null,
+      scheduled_date: values.scheduled_date || null,
+      scheduled_time: values.scheduled_time || null,
+      estimated_minutes: values.estimated_minutes
+        ? parseInt(values.estimated_minutes, 10)
+        : null,
+      tags: values.tags,
+      project_id:
+        values.project_id && values.project_id !== "none"
+          ? values.project_id
+          : null,
+      goal_id:
+        values.goal_id && values.goal_id !== "none" ? values.goal_id : null,
+    };
+
+    try {
+      if (editingTask) {
+        const updated = await patchTask(editingTask.id, payload);
+        setTasks((prev) =>
+          prev.map((t) => (t.id === editingTask.id ? updated : t))
+        );
+      } else {
+        const newTask = await createTask(payload);
+        setTasks((prev) => [newTask, ...prev]);
+      }
+
+      setFormOpen(false);
+      setEditingTask(null);
+    } catch (err) {
+      console.error("Form submit failed:", err);
+    }
   }
 
   function handleSelect(task: TaskItemData) {
@@ -332,6 +372,14 @@ export default function OppgaverPage() {
   // Render
   // -----------------------------------------------------------------------
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header */}
@@ -339,7 +387,7 @@ export default function OppgaverPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Oppgaver</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {tasks.filter((t) => t.status !== "done").length} aktive oppgaver
+            {activeTasks.length} aktive oppgaver
           </p>
         </div>
         <Button onClick={() => { setEditingTask(null); setFormOpen(true); }}>
@@ -373,19 +421,17 @@ export default function OppgaverPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="alle">Alle omrader</SelectItem>
-            {(Object.entries(AREA_DEFAULTS) as [AreaSlug, (typeof AREA_DEFAULTS)[AreaSlug]][]).map(
-              ([slug, area]) => (
-                <SelectItem key={slug} value={slug}>
-                  <span className="flex items-center gap-2">
-                    <span
-                      className="size-2 rounded-full"
-                      style={{ backgroundColor: area.color }}
-                    />
-                    {area.name}
-                  </span>
-                </SelectItem>
-              )
-            )}
+            {areas.map((area) => (
+              <SelectItem key={area.slug} value={area.slug}>
+                <span className="flex items-center gap-2">
+                  <span
+                    className="size-2 rounded-full"
+                    style={{ backgroundColor: area.color }}
+                  />
+                  {area.name}
+                </span>
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
@@ -498,6 +544,9 @@ export default function OppgaverPage() {
           </DialogHeader>
           <TaskForm
             key={editingTask?.id ?? "new"}
+            areas={areas}
+            projects={projects}
+            goals={goals}
             initialValues={
               editingTask
                 ? {
@@ -510,6 +559,8 @@ export default function OppgaverPage() {
                     scheduled_time: editingTask.scheduled_time ?? "",
                     estimated_minutes: editingTask.estimated_minutes?.toString() ?? "",
                     tags: editingTask.tags ?? [],
+                    project_id: editingTask.project_id ?? "",
+                    goal_id: editingTask.goal_id ?? "",
                   }
                 : undefined
             }

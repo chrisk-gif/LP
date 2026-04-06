@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   addDays,
   addWeeks,
@@ -10,9 +10,12 @@ import {
   subMonths,
   startOfWeek,
   endOfWeek,
+  startOfDay,
+  endOfDay,
+  startOfMonth,
+  endOfMonth,
   format,
   parseISO,
-  isSameDay,
 } from "date-fns";
 import { nb } from "date-fns/locale";
 import {
@@ -23,168 +26,19 @@ import {
   List,
   Clock,
   Sun,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { MonthView } from "@/components/calendar/MonthView";
 import { DayView } from "@/components/calendar/DayView";
-import { EventCard, type CalendarEvent, type CalendarTask } from "@/components/calendar/EventCard";
-import { formatTime, formatDate, formatRelative } from "@/lib/dates";
-import { cn } from "@/lib/utils";
-
-// ==========================================================================
-// Demo data
-// ==========================================================================
-
-const NOW = new Date();
-const TODAY = new Date(NOW.getFullYear(), NOW.getMonth(), NOW.getDate());
-
-function dayAt(offset: number): Date {
-  return addDays(TODAY, offset);
-}
-
-function isoAt(offset: number, hour: number, min = 0): string {
-  const d = dayAt(offset);
-  d.setHours(hour, min, 0, 0);
-  return d.toISOString();
-}
-
-const DEMO_EVENTS: CalendarEvent[] = [
-  {
-    id: "evt-1",
-    title: "Mote med byggherre",
-    description: "Statusmote Byasentunnelen med Nye Veier.",
-    event_type: "meeting",
-    start_time: isoAt(0, 9, 0),
-    end_time: isoAt(0, 10, 30),
-    location: "Teams",
-    area: { name: "Asplan Viak", slug: "asplan-viak", color: "#2563eb" },
-  },
-  {
-    id: "evt-2",
-    title: "Treningsokt: Styrke",
-    description: "Overkropp + core.",
-    event_type: "workout",
-    start_time: isoAt(0, 17, 0),
-    end_time: isoAt(0, 18, 15),
-    location: "SATS Trondheim",
-    area: { name: "Trening", slug: "trening", color: "#dc2626" },
-  },
-  {
-    id: "evt-3",
-    title: "Lunsj med kollega",
-    description: "Diskutere nytt prosjekt.",
-    event_type: "personal",
-    start_time: isoAt(1, 11, 30),
-    end_time: isoAt(1, 12, 30),
-    location: "Kafeteria",
-    area: { name: "Asplan Viak", slug: "asplan-viak", color: "#2563eb" },
-  },
-  {
-    id: "evt-4",
-    title: "Prosjektgjennomgang Div. 40",
-    event_type: "meeting",
-    start_time: isoAt(1, 13, 0),
-    end_time: isoAt(1, 14, 0),
-    location: "Moterom A3",
-    area: { name: "Asplan Viak", slug: "asplan-viak", color: "#2563eb" },
-  },
-  {
-    id: "evt-5",
-    title: "Lopetur: Intervaller",
-    event_type: "workout",
-    start_time: isoAt(2, 6, 30),
-    end_time: isoAt(2, 7, 30),
-    area: { name: "Trening", slug: "trening", color: "#dc2626" },
-  },
-  {
-    id: "evt-6",
-    title: "Fokusokt: Tilbudsskriving",
-    event_type: "focus_block",
-    start_time: isoAt(2, 8, 0),
-    end_time: isoAt(2, 11, 0),
-    area: { name: "Asplan Viak", slug: "asplan-viak", color: "#2563eb" },
-  },
-  {
-    id: "evt-7",
-    title: "Middag med venner",
-    event_type: "personal",
-    start_time: isoAt(3, 19, 0),
-    end_time: isoAt(3, 22, 0),
-    location: "Baklandet Skydsstation",
-    area: { name: "Privat", slug: "privat", color: "#059669" },
-  },
-  {
-    id: "evt-8",
-    title: "ytly.no strategimote",
-    event_type: "meeting",
-    start_time: isoAt(4, 10, 0),
-    end_time: isoAt(4, 11, 0),
-    location: "Google Meet",
-    area: { name: "ytly.no", slug: "ytly", color: "#7c3aed" },
-  },
-  {
-    id: "evt-9",
-    title: "Legetime",
-    event_type: "personal",
-    start_time: isoAt(5, 14, 0),
-    end_time: isoAt(5, 14, 30),
-    location: "Trondheim legesenter",
-    area: { name: "Privat", slug: "privat", color: "#059669" },
-  },
-];
-
-const DEMO_TASKS: CalendarTask[] = [
-  {
-    id: "task-c1",
-    title: "Ferdigstille prismatrise for Byasentunnelen",
-    due_date: dayAt(0).toISOString().split("T")[0],
-    scheduled_date: dayAt(0).toISOString().split("T")[0],
-    scheduled_time: "14:00",
-    priority: "critical",
-    status: "in_progress",
-    estimated_minutes: 120,
-    area: { name: "Asplan Viak", slug: "asplan-viak", color: "#2563eb" },
-  },
-  {
-    id: "task-c2",
-    title: "Sjekk status ytly.no nettside",
-    due_date: dayAt(0).toISOString().split("T")[0],
-    priority: "high",
-    status: "todo",
-    estimated_minutes: 30,
-    area: { name: "ytly.no", slug: "ytly", color: "#7c3aed" },
-  },
-  {
-    id: "task-c3",
-    title: "Sende faktura til Rogaland fylkeskommune",
-    due_date: dayAt(1).toISOString().split("T")[0],
-    scheduled_date: dayAt(1).toISOString().split("T")[0],
-    scheduled_time: "09:00",
-    priority: "high",
-    status: "todo",
-    estimated_minutes: 45,
-    area: { name: "Asplan Viak", slug: "asplan-viak", color: "#2563eb" },
-  },
-  {
-    id: "task-c4",
-    title: "Oppdater manedlig budsjettsporing",
-    due_date: dayAt(-5).toISOString().split("T")[0],
-    priority: "medium",
-    status: "todo",
-    estimated_minutes: 60,
-    area: { name: "Okonomi", slug: "okonomi", color: "#d97706" },
-  },
-  {
-    id: "task-c5",
-    title: "Treningsprogram: Uke 14",
-    due_date: dayAt(7).toISOString().split("T")[0],
-    priority: "medium",
-    status: "todo",
-    estimated_minutes: 360,
-    area: { name: "Trening", slug: "trening", color: "#dc2626" },
-  },
-];
+import {
+  EventCard,
+  type CalendarEvent,
+  type CalendarTask,
+} from "@/components/calendar/EventCard";
+import { cn as _cn } from "@/lib/utils";
+void _cn;
 
 // ==========================================================================
 // View types
@@ -205,6 +59,100 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   maned: "Maned",
   liste: "Liste",
 };
+
+// ==========================================================================
+// Date range calculation
+// ==========================================================================
+
+interface DateRange {
+  start: string; // ISO string
+  end: string; // ISO string
+}
+
+function getDateRange(view: ViewMode, date: Date): DateRange {
+  switch (view) {
+    case "dag":
+      return {
+        start: startOfDay(date).toISOString(),
+        end: endOfDay(date).toISOString(),
+      };
+    case "uke":
+      return {
+        start: startOfWeek(date, { weekStartsOn: 1 }).toISOString(),
+        end: endOfWeek(date, { weekStartsOn: 1 }).toISOString(),
+      };
+    case "maned":
+      return {
+        start: startOfMonth(date).toISOString(),
+        end: endOfMonth(date).toISOString(),
+      };
+    case "liste":
+      return {
+        start: startOfDay(date).toISOString(),
+        end: endOfDay(addDays(date, 13)).toISOString(),
+      };
+  }
+}
+
+// ==========================================================================
+// API response mapping
+// ==========================================================================
+
+interface ApiEvent {
+  id: string;
+  title: string;
+  description?: string | null;
+  event_type: string;
+  start_time: string;
+  end_time?: string | null;
+  all_day?: boolean;
+  location?: string | null;
+  color?: string;
+  areas?: { name: string; slug: string; color: string } | null;
+}
+
+interface ApiTask {
+  id: string;
+  title: string;
+  scheduled_date?: string | null;
+  scheduled_time?: string | null;
+  due_date?: string | null;
+  due_time?: string | null;
+  priority: string;
+  status: string;
+  estimated_minutes?: number | null;
+  areas?: { name: string; slug: string; color: string } | null;
+}
+
+function mapApiEvent(raw: ApiEvent): CalendarEvent {
+  return {
+    id: raw.id,
+    title: raw.title,
+    description: raw.description,
+    event_type: raw.event_type,
+    start_time: raw.start_time,
+    end_time: raw.end_time,
+    all_day: raw.all_day,
+    location: raw.location,
+    color: raw.color,
+    area: raw.areas ?? null,
+  };
+}
+
+function mapApiTask(raw: ApiTask): CalendarTask {
+  return {
+    id: raw.id,
+    title: raw.title,
+    scheduled_date: raw.scheduled_date,
+    scheduled_time: raw.scheduled_time,
+    due_date: raw.due_date,
+    due_time: raw.due_time,
+    priority: raw.priority,
+    status: raw.status,
+    estimated_minutes: raw.estimated_minutes,
+    area: raw.areas ?? null,
+  };
+}
 
 // ==========================================================================
 // List view component
@@ -285,7 +233,7 @@ function ListView({
           </div>
         </div>
       ))}
-      {grouped.length === 0 && (
+      {grouped.length === 0 && tasks.length === 0 && (
         <p className="text-center text-sm text-muted-foreground py-12">
           Ingen hendelser i denne perioden
         </p>
@@ -301,6 +249,70 @@ function ListView({
 export default function KalenderPage() {
   const [view, setView] = useState<ViewMode>("uke");
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [tasks, setTasks] = useState<CalendarTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Compute date range for the current view
+  const dateRange = useMemo(
+    () => getDateRange(view, currentDate),
+    [view, currentDate]
+  );
+
+  // Fetch events and tasks when the date range changes
+  const fetchData = useCallback(async (range: DateRange) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const eventsParams = new URLSearchParams({
+        start_after: range.start,
+        start_before: range.end,
+      });
+
+      const tasksParams = new URLSearchParams({
+        due_before: range.end.split("T")[0],
+      });
+
+      const [eventsRes, tasksRes] = await Promise.all([
+        fetch(`/api/events?${eventsParams.toString()}`),
+        fetch(`/api/tasks?${tasksParams.toString()}`),
+      ]);
+
+      if (!eventsRes.ok) {
+        const errBody = await eventsRes.json().catch(() => null);
+        throw new Error(
+          errBody?.error ?? `Feil ved henting av hendelser (${eventsRes.status})`
+        );
+      }
+      if (!tasksRes.ok) {
+        const errBody = await tasksRes.json().catch(() => null);
+        throw new Error(
+          errBody?.error ?? `Feil ved henting av oppgaver (${tasksRes.status})`
+        );
+      }
+
+      const [eventsData, tasksData] = await Promise.all([
+        eventsRes.json() as Promise<ApiEvent[]>,
+        tasksRes.json() as Promise<ApiTask[]>,
+      ]);
+
+      setEvents(eventsData.map(mapApiEvent));
+      setTasks(tasksData.map(mapApiTask));
+    } catch (err) {
+      console.error("Calendar fetch error:", err);
+      setError(
+        err instanceof Error ? err.message : "Kunne ikke laste kalenderdata"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData(dateRange);
+  }, [dateRange, fetchData]);
 
   // Navigation
   function goNext() {
@@ -358,13 +370,13 @@ export default function KalenderPage() {
     }
   }
 
+  // TODO: Open a create-event dialog when a time slot is clicked
   function handleSlotClick(date: Date, hour: number) {
-    // Placeholder: in production this would open a create event dialog
     console.log("Create event at", date, hour);
   }
 
+  // TODO: Open an event detail/edit dialog when an event is clicked
   function handleEventClick(event: CalendarEvent) {
-    // Placeholder: in production this would open event details
     console.log("View event", event);
   }
 
@@ -414,43 +426,72 @@ export default function KalenderPage() {
         </Button>
       </div>
 
+      {/* Error state */}
+      {error && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 p-4 mb-4">
+          <p className="text-sm text-destructive">{error}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            onClick={() => fetchData(dateRange)}
+          >
+            Prov igjen
+          </Button>
+        </div>
+      )}
+
+      {/* Loading state */}
+      {loading && (
+        <div className="flex items-center justify-center py-24">
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+          <span className="ml-2 text-sm text-muted-foreground">
+            Laster kalender...
+          </span>
+        </div>
+      )}
+
       {/* Calendar views */}
-      {view === "uke" && (
-        <CalendarView
-          date={currentDate}
-          events={DEMO_EVENTS}
-          tasks={DEMO_TASKS}
-          onSlotClick={handleSlotClick}
-          onEventClick={handleEventClick}
-        />
-      )}
+      {!loading && !error && (
+        <>
+          {view === "uke" && (
+            <CalendarView
+              date={currentDate}
+              events={events}
+              tasks={tasks}
+              onSlotClick={handleSlotClick}
+              onEventClick={handleEventClick}
+            />
+          )}
 
-      {view === "maned" && (
-        <MonthView
-          date={currentDate}
-          events={DEMO_EVENTS}
-          tasks={DEMO_TASKS}
-          onDayClick={handleDayClick}
-          onEventClick={handleEventClick}
-        />
-      )}
+          {view === "maned" && (
+            <MonthView
+              date={currentDate}
+              events={events}
+              tasks={tasks}
+              onDayClick={handleDayClick}
+              onEventClick={handleEventClick}
+            />
+          )}
 
-      {view === "dag" && (
-        <DayView
-          date={currentDate}
-          events={DEMO_EVENTS}
-          tasks={DEMO_TASKS}
-          onSlotClick={handleSlotClick}
-          onEventClick={handleEventClick}
-        />
-      )}
+          {view === "dag" && (
+            <DayView
+              date={currentDate}
+              events={events}
+              tasks={tasks}
+              onSlotClick={handleSlotClick}
+              onEventClick={handleEventClick}
+            />
+          )}
 
-      {view === "liste" && (
-        <ListView
-          events={DEMO_EVENTS}
-          tasks={DEMO_TASKS}
-          onEventClick={handleEventClick}
-        />
+          {view === "liste" && (
+            <ListView
+              events={events}
+              tasks={tasks}
+              onEventClick={handleEventClick}
+            />
+          )}
+        </>
       )}
     </div>
   );

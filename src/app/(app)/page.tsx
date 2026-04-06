@@ -1,9 +1,11 @@
 import { Suspense } from 'react'
+import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { DashboardGrid } from '@/components/dashboard/DashboardGrid'
 import { StatsBar } from '@/components/dashboard/StatsBar'
 
 function getGreeting(): string {
   const hour = new Date().getHours()
+  if (hour < 6) return 'God natt'
   if (hour < 12) return 'God morgen'
   if (hour < 17) return 'God ettermiddag'
   return 'God kveld'
@@ -18,14 +20,29 @@ function getTodayFormatted(): string {
   })
 }
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
   const greeting = getGreeting()
   const todayFormatted = getTodayFormatted()
+
+  const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  let displayName = 'bruker'
+  if (user) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('display_name')
+      .eq('id', user.id)
+      .single()
+    if (profile?.display_name) {
+      displayName = profile.display_name
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto w-full">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{greeting}, Christian</h1>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{greeting}, {displayName}</h1>
         <p className="text-muted-foreground mt-1 capitalize">{todayFormatted}</p>
       </header>
 

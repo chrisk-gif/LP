@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { TaskItem, type TaskItemData } from "./TaskItem";
 
 interface TaskListProps {

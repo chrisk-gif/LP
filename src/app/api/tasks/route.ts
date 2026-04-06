@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createTaskSchema } from "@/lib/schemas/task";
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,6 +12,7 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get("status");
     const area_id = searchParams.get("area_id");
     const scheduled_date = searchParams.get("scheduled_date");
+    const due_before = searchParams.get("due_before");
 
     let query = supabase
       .from("tasks")
@@ -21,6 +23,7 @@ export async function GET(request: NextRequest) {
     if (status) query = query.eq("status", status);
     if (area_id) query = query.eq("area_id", area_id);
     if (scheduled_date) query = query.eq("scheduled_date", scheduled_date);
+    if (due_before) query = query.lte("due_date", due_before);
 
     const { data, error } = await query;
     if (error) throw error;
@@ -39,27 +42,19 @@ export async function POST(request: NextRequest) {
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await request.json();
-    const { title, description, area_id, priority, due_date, scheduled_date, scheduled_time, estimated_minutes, status: taskStatus, source, tags } = body;
-
-    if (!title) {
-      return NextResponse.json({ error: "Title is required" }, { status: 400 });
+    const parsed = createTaskSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: parsed.error.flatten().fieldErrors },
+        { status: 400 }
+      );
     }
 
     const { data, error } = await supabase
       .from("tasks")
       .insert({
+        ...parsed.data,
         user_id: user.id,
-        title,
-        description,
-        area_id,
-        priority: priority ?? "medium",
-        due_date,
-        scheduled_date,
-        scheduled_time,
-        estimated_minutes,
-        status: taskStatus ?? "todo",
-        source: source ?? "manual",
-        tags,
       })
       .select("*, areas(name, slug, color)")
       .single();

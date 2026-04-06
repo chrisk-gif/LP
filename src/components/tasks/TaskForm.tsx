@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AREA_DEFAULTS, TASK_PRIORITIES, type AreaSlug } from "@/lib/constants";
+import { TASK_PRIORITIES } from "@/lib/constants";
 import { X } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -33,8 +33,18 @@ export interface TaskFormValues {
   goal_id: string;
 }
 
+interface AreaOption {
+  id: string;
+  name: string;
+  slug: string;
+  color: string;
+}
+
 interface TaskFormProps {
   initialValues?: Partial<TaskFormValues>;
+  areas?: AreaOption[];
+  projects?: Array<{ id: string; title: string }>;
+  goals?: Array<{ id: string; title: string }>;
   onSubmit: (values: TaskFormValues) => void;
   onCancel: () => void;
   submitLabel?: string;
@@ -53,6 +63,9 @@ const PRIORITY_LABELS: Record<string, string> = {
 
 export function TaskForm({
   initialValues,
+  areas = [],
+  projects = [],
+  goals = [],
   onSubmit,
   onCancel,
   submitLabel = "Opprett oppgave",
@@ -130,7 +143,7 @@ export function TaskForm({
       {/* Area + Priority row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="flex flex-col gap-1.5">
-          <Label>Omrade</Label>
+          <Label>Omrade *</Label>
           <Select
             value={values.area_slug}
             onValueChange={(v) => update("area_slug", v)}
@@ -139,19 +152,17 @@ export function TaskForm({
               <SelectValue placeholder="Velg omrade" />
             </SelectTrigger>
             <SelectContent>
-              {(Object.entries(AREA_DEFAULTS) as [AreaSlug, (typeof AREA_DEFAULTS)[AreaSlug]][]).map(
-                ([slug, area]) => (
-                  <SelectItem key={slug} value={slug}>
-                    <span className="flex items-center gap-2">
-                      <span
-                        className="size-2 rounded-full"
-                        style={{ backgroundColor: area.color }}
-                      />
-                      {area.name}
-                    </span>
-                  </SelectItem>
-                )
-              )}
+              {areas.map((area) => (
+                <SelectItem key={area.slug} value={area.slug}>
+                  <span className="flex items-center gap-2">
+                    <span
+                      className="size-2 rounded-full"
+                      style={{ backgroundColor: area.color }}
+                    />
+                    {area.name}
+                  </span>
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -277,11 +288,11 @@ export function TaskForm({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="none">Ingen</SelectItem>
-              <SelectItem value="proj-byasen">
-                Byasentunnelen rehabilitering
-              </SelectItem>
-              <SelectItem value="proj-ytly">ytly.no lansering</SelectItem>
-              <SelectItem value="proj-bolig">Boligkjop 2026</SelectItem>
+              {projects.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.title}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -297,15 +308,11 @@ export function TaskForm({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="none">Ingen</SelectItem>
-              <SelectItem value="goal-fitness">
-                Lope halvmaraton under 1:45
-              </SelectItem>
-              <SelectItem value="goal-cert">
-                Prosjektledersertifisering
-              </SelectItem>
-              <SelectItem value="goal-savings">
-                Spare 200 000 i 2026
-              </SelectItem>
+              {goals.map((g) => (
+                <SelectItem key={g.id} value={g.id}>
+                  {g.title}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -316,7 +323,7 @@ export function TaskForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           Avbryt
         </Button>
-        <Button type="submit" disabled={!values.title.trim()}>
+        <Button type="submit" disabled={!values.title.trim() || !values.area_slug}>
           {submitLabel}
         </Button>
       </div>

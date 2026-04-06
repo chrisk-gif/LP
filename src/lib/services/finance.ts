@@ -41,7 +41,6 @@ export async function getFinanceItems(filters?: {
 }
 
 export async function getDueFinanceItems(daysAhead = 14) {
-  const today = new Date().toISOString().split("T")[0];
   const future = new Date(Date.now() + daysAhead * 86400000)
     .toISOString()
     .split("T")[0];

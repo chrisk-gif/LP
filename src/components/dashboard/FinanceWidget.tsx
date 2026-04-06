@@ -1,16 +1,7 @@
-'use client'
-
 import Link from 'next/link'
 import { Wallet, ChevronRight } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent, CardAction } from '@/components/ui/card'
-
-// DEMO DATA - Replace with API call
-const DEMO_BILLS = [
-  { id: '1', title: 'Husleie', amount: 14500, dueDate: '2026-04-15', paid: false },
-  { id: '2', title: 'Strom - Tibber', amount: 1890, dueDate: '2026-04-10', paid: false },
-  { id: '3', title: 'Forsikring - Gjensidige', amount: 3200, dueDate: '2026-04-20', paid: false },
-  { id: '4', title: 'Barnehage', amount: 3230, dueDate: '2026-04-15', paid: false },
-]
+import { createServerSupabaseClient } from '@/lib/supabase/server'
 
 function formatNOK(amount: number): string {
   return new Intl.NumberFormat('nb-NO', {
@@ -26,8 +17,25 @@ function formatDateNO(dateStr: string): string {
   return d.toLocaleDateString('nb-NO', { day: 'numeric', month: 'short' })
 }
 
-export function FinanceWidget() {
-  const totalDue = DEMO_BILLS.reduce((sum, b) => sum + b.amount, 0)
+export async function FinanceWidget() {
+  const supabase = await createServerSupabaseClient()
+
+  const now = new Date()
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  const monthEnd = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`
+
+  const { data: bills } = await supabase
+    .from('finance_items')
+    .select('id, title, amount, due_date, status')
+    .gte('due_date', monthStart)
+    .lt('due_date', monthEnd)
+    .not('status', 'eq', 'paid')
+    .order('due_date', { ascending: true })
+    .limit(5)
+
+  const items = bills ?? []
+  const totalDue = items.reduce((sum, b) => sum + (Number(b.amount) || 0), 0)
 
   return (
     <Link href="/okonomi" className="block">
@@ -42,21 +50,29 @@ export function FinanceWidget() {
           </CardAction>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="text-xs text-muted-foreground">
-            Forfaller denne mnd:{' '}
-            <span className="font-semibold text-foreground">{formatNOK(totalDue)}</span>
-          </div>
-          {DEMO_BILLS.map((bill) => (
-            <div key={bill.id} className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-sm truncate">{bill.title}</p>
-                <p className="text-xs text-muted-foreground">{formatDateNO(bill.dueDate)}</p>
+          {items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Ingen ubetalte regninger denne mnd</p>
+          ) : (
+            <>
+              <div className="text-xs text-muted-foreground">
+                Forfaller denne mnd:{' '}
+                <span className="font-semibold text-foreground">{formatNOK(totalDue)}</span>
               </div>
-              <span className="shrink-0 text-sm font-medium tabular-nums">
-                {formatNOK(bill.amount)}
-              </span>
-            </div>
-          ))}
+              {items.map((bill) => (
+                <div key={bill.id} className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm truncate">{bill.title}</p>
+                    {bill.due_date && (
+                      <p className="text-xs text-muted-foreground">{formatDateNO(bill.due_date)}</p>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-sm font-medium tabular-nums">
+                    {formatNOK(Number(bill.amount) || 0)}
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
         </CardContent>
       </Card>
     </Link>

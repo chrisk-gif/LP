@@ -122,6 +122,7 @@ export default function TodayPage() {
   const [notes, setNotes] = useState("");
   const [notesSaved, setNotesSaved] = useState(false);
   const [notesSaving, setNotesSaving] = useState(false);
+  const [dayNoteId, setDayNoteId] = useState<string | null>(null);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
@@ -135,7 +136,7 @@ export default function TodayPage() {
 
       const [tasksRes, overdueRes, eventsRes] = await Promise.all([
         fetch(`/api/tasks?scheduled_date=${today}`),
-        fetch(`/api/tasks?due_before=${today}&status=todo`),
+        fetch(`/api/tasks?due_before_exclusive=${today}&status=todo`),
         fetch(
           `/api/events?start_after=${encodeURIComponent(todayStartISO())}&start_before=${encodeURIComponent(todayEndISO())}`
         ),
@@ -171,6 +172,7 @@ export default function TodayPage() {
         const data = await res.json();
         if (data.length > 0) {
           setNotes(data[0].content ?? "");
+          setDayNoteId(data[0].id);
         }
       }
     } catch {
@@ -190,21 +192,16 @@ export default function TodayPage() {
       const today = todayISO();
       const tag = `dag-${today}`;
 
-      // Check if a day note already exists
-      const checkRes = await fetch(`/api/notes?tag=${tag}`);
-      if (!checkRes.ok) throw new Error("Feil");
-      const existing = await checkRes.json();
-
-      if (existing.length > 0) {
-        // Update existing note
+      if (dayNoteId) {
+        // Update existing note by tracked ID (no duplicate risk)
         await fetch("/api/notes", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: existing[0].id, content }),
+          body: JSON.stringify({ id: dayNoteId, content }),
         });
       } else if (content.trim()) {
-        // Create new day note
-        await fetch("/api/notes", {
+        // Create new day note and track the ID
+        const res = await fetch("/api/notes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -213,6 +210,10 @@ export default function TodayPage() {
             tags: [tag],
           }),
         });
+        if (res.ok) {
+          const created = await res.json();
+          setDayNoteId(created.id);
+        }
       }
       setNotesSaved(true);
       setTimeout(() => setNotesSaved(false), 2000);
@@ -221,7 +222,7 @@ export default function TodayPage() {
     } finally {
       setNotesSaving(false);
     }
-  }, []);
+  }, [dayNoteId]);
 
   const handleNotesChange = (value: string) => {
     setNotes(value);

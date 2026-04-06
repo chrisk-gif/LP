@@ -1,5 +1,8 @@
 // =============================================================================
 // Livsplanlegg – Project Zod Schemas
+// Aligned with SQL: projects(id, user_id, area_id, goal_id, title, description,
+//   type, status, priority, start_date, due_date, progress, notes, archived)
+// Status enum: active, backlog, completed, archived
 // =============================================================================
 
 import { z } from 'zod';
@@ -10,7 +13,7 @@ import { z } from 'zod';
 
 export const projectStatusSchema = z.enum([
   'active',
-  'on_hold',
+  'backlog',
   'completed',
   'archived',
 ]);
@@ -20,19 +23,16 @@ export const projectStatusSchema = z.enum([
 // ---------------------------------------------------------------------------
 
 export const createProjectSchema = z.object({
-  area_id: z.string().uuid().nullable().optional(),
+  area_id: z.string().uuid(),
   goal_id: z.string().uuid().nullable().optional(),
-  name: z.string().min(1, 'Name is required').max(500),
+  title: z.string().min(1, 'Title is required').max(500),
   description: z.string().max(10000).nullable().optional(),
+  type: z.string().max(200).nullable().optional(),
   status: projectStatusSchema.optional().default('active'),
+  priority: z.enum(['critical', 'high', 'medium', 'low']).optional().default('medium'),
   start_date: z.string().date().nullable().optional(),
-  target_date: z.string().date().nullable().optional(),
-  color: z
-    .string()
-    .regex(/^#[0-9a-fA-F]{6}$/, 'Must be a hex color')
-    .nullable()
-    .optional(),
-  sort_order: z.number().int().optional().default(0),
+  due_date: z.string().date().nullable().optional(),
+  notes: z.string().max(10000).nullable().optional(),
 });
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
@@ -42,21 +42,18 @@ export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 // ---------------------------------------------------------------------------
 
 export const updateProjectSchema = z.object({
-  id: z.string().uuid(),
-  area_id: z.string().uuid().nullable().optional(),
-  goal_id: z.string().uuid().nullable().optional(),
-  name: z.string().min(1).max(500).optional(),
+  title: z.string().min(1).max(500).optional(),
   description: z.string().max(10000).nullable().optional(),
+  area_id: z.string().uuid().optional(),
+  goal_id: z.string().uuid().nullable().optional(),
+  type: z.string().max(200).nullable().optional(),
   status: projectStatusSchema.optional(),
+  priority: z.enum(['critical', 'high', 'medium', 'low']).optional(),
   start_date: z.string().date().nullable().optional(),
-  target_date: z.string().date().nullable().optional(),
-  completed_at: z.string().datetime().nullable().optional(),
-  color: z
-    .string()
-    .regex(/^#[0-9a-fA-F]{6}$/)
-    .nullable()
-    .optional(),
-  sort_order: z.number().int().optional(),
+  due_date: z.string().date().nullable().optional(),
+  progress: z.number().min(0).max(100).optional(),
+  notes: z.string().max(10000).nullable().optional(),
+  archived: z.boolean().optional(),
 });
 
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;

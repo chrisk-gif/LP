@@ -25,10 +25,9 @@ export async function POST(request: NextRequest) {
           raw_transcript: browserTranscript,
           normalized_transcript: browserTranscript,
           language: "nb-NO",
-          source: "browser",
         });
       } catch {
-        console.error("Failed to log voice command");
+        // Voice logging is best-effort
       }
 
       return NextResponse.json({

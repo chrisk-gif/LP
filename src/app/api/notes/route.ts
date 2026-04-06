@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { createNoteSchema } from "@/lib/schemas/note";
+import { createNoteSchema, updateNoteSchema } from "@/lib/schemas/note";
 
 export async function GET(request: NextRequest) {
   try {
@@ -69,11 +69,21 @@ export async function PATCH(request: NextRequest) {
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await request.json();
-    const { id, ...updates } = body as { id: string; [key: string]: unknown };
+    const { id, ...rest } = body as { id?: string; [key: string]: unknown };
 
     if (!id) {
       return NextResponse.json({ error: "ID is required" }, { status: 400 });
     }
+
+    const parsed = updateNoteSchema.safeParse({ id, ...rest });
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: parsed.error.flatten().fieldErrors },
+        { status: 400 }
+      );
+    }
+
+    const { id: _id, ...updates } = parsed.data;
 
     const { data, error } = await supabase
       .from("notes")

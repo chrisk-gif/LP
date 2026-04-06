@@ -225,7 +225,7 @@ async function executeMarkPaid(
 
   const { error } = await supabase
     .from("finance_items")
-    .update({ status: "paid", paid_at: new Date().toISOString() })
+    .update({ status: "paid", paid_date: new Date().toISOString().split("T")[0] })
     .eq("id", item.id);
 
   if (error) return fail(`Kunne ikke markere som betalt: ${error.message}`);
@@ -319,9 +319,9 @@ async function executeQueryData(
     case "active_tenders": {
       const { data, error } = await supabase
         .from("tenders")
-        .select("id, title, status, deadline, client")
+        .select("id, title, status, due_date, client")
         .in("status", ["identified", "preparing", "submitted"])
-        .order("deadline", { ascending: true })
+        .order("due_date", { ascending: true })
         .limit(20);
 
       if (error) return fail(`Feil ved henting av tilbud: ${error.message}`);
@@ -369,7 +369,7 @@ async function executeQueryData(
     case "active_goals": {
       const { data, error } = await supabase
         .from("goals")
-        .select("id, title, horizon, progress, target_date")
+        .select("id, title, horizon, current_progress, target_date")
         .eq("status", "active")
         .order("target_date", { ascending: true })
         .limit(20);

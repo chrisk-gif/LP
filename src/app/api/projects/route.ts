@@ -15,7 +15,6 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from("projects")
       .select("*, areas(name, slug, color)")
-      .order("sort_order", { ascending: true })
       .order("created_at", { ascending: false });
 
     if (status) query = query.eq("status", status);

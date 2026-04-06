@@ -545,6 +545,12 @@ export default function KalenderPage() {
 // Create event dialog
 // ==========================================================================
 
+interface AreaOption {
+  id: string;
+  name: string;
+  slug: string;
+}
+
 function CreateEventDialog({
   open,
   onOpenChange,
@@ -561,10 +567,35 @@ function CreateEventDialog({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [eventType, setEventType] = useState("meeting");
+  const [areaId, setAreaId] = useState("");
+  const [areas, setAreas] = useState<AreaOption[]>([]);
   const [startDate, setStartDate] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [location, setLocation] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    // Fetch areas for the selector
+    async function loadAreas() {
+      try {
+        const res = await fetch("/api/events?_areas_only=1");
+        // We don't have a dedicated areas endpoint; fetch from supabase client
+        const { createClient } = await import("@/lib/supabase/client");
+        const supabase = createClient();
+        const { data } = await supabase.from("areas").select("id, name, slug").order("name");
+        if (data) setAreas(data);
+        // Auto-select privat if available
+        if (data && data.length > 0 && !areaId) {
+          const privat = data.find((a: AreaOption) => a.slug === "privat");
+          setAreaId(privat?.id ?? data[0].id);
+        }
+      } catch {
+        // areas remain empty
+      }
+    }
+    loadAreas();
+  }, [open]);
 
   useEffect(() => {
     if (open && defaults.date) {
@@ -588,6 +619,10 @@ function CreateEventDialog({
       setFormError("Dato og starttid er påkrevd");
       return;
     }
+    if (!areaId) {
+      setFormError("Velg et område");
+      return;
+    }
 
     setSubmitting(true);
     setFormError(null);
@@ -602,6 +637,7 @@ function CreateEventDialog({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          area_id: areaId,
           title: title.trim(),
           description: description.trim() || null,
           event_type: eventType,
@@ -649,21 +685,36 @@ function CreateEventDialog({
               required
             />
           </div>
-          <div className="space-y-2">
-            <Label>Type</Label>
-            <Select value={eventType} onValueChange={setEventType}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="meeting">Møte</SelectItem>
-                <SelectItem value="deadline">Frist</SelectItem>
-                <SelectItem value="reminder">Påminnelse</SelectItem>
-                <SelectItem value="block">Fokustid</SelectItem>
-                <SelectItem value="personal">Personlig</SelectItem>
-                <SelectItem value="other">Annet</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <Select value={eventType} onValueChange={setEventType}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="meeting">Møte</SelectItem>
+                  <SelectItem value="deadline">Frist</SelectItem>
+                  <SelectItem value="reminder">Påminnelse</SelectItem>
+                  <SelectItem value="block">Fokustid</SelectItem>
+                  <SelectItem value="personal">Personlig</SelectItem>
+                  <SelectItem value="other">Annet</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Område <span className="text-destructive">*</span></Label>
+              <Select value={areaId} onValueChange={setAreaId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Velg område..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {areas.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div className="space-y-2">
@@ -789,8 +840,10 @@ function ViewEventDialog({
   const handleDelete = async () => {
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/events?id=${event.id}`, {
+      const res = await fetch("/api/events", {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: event.id }),
       });
       if (!res.ok) throw new Error("Feil ved sletting");
       onDeleted(event.id);

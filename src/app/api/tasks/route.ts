@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
     const area_id = searchParams.get("area_id");
     const scheduled_date = searchParams.get("scheduled_date");
     const due_before = searchParams.get("due_before");
+    const due_before_exclusive = searchParams.get("due_before_exclusive");
 
     let query = supabase
       .from("tasks")
@@ -24,6 +25,7 @@ export async function GET(request: NextRequest) {
     if (area_id) query = query.eq("area_id", area_id);
     if (scheduled_date) query = query.eq("scheduled_date", scheduled_date);
     if (due_before) query = query.lte("due_date", due_before);
+    if (due_before_exclusive) query = query.lt("due_date", due_before_exclusive);
 
     const { data, error } = await query;
     if (error) throw error;

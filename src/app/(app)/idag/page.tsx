@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
   Target,
@@ -13,10 +13,13 @@ import {
   Plus,
   Loader2,
   AlertCircle,
+  Save,
+  Check,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { QuickAdd } from "@/components/QuickAdd";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -117,6 +120,12 @@ export default function TodayPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
+  const [notesSaved, setNotesSaved] = useState(false);
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const notesTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -140,8 +149,7 @@ export default function TodayPage() {
         await Promise.all([tasksRes.json(), overdueRes.json(), eventsRes.json()]);
 
       setTasks(tasksData);
-      // Filter out tasks that are already scheduled for today (avoid duplicates)
-      // and exclude done tasks
+      // Filter out tasks scheduled for today (avoid dups) and done tasks
       const overdueFiltered = overdueData.filter(
         (t) => t.scheduled_date !== today && t.status !== "done"
       );
@@ -154,13 +162,76 @@ export default function TodayPage() {
     }
   }, []);
 
+  // Load day notes from backend
+  const loadDayNotes = useCallback(async () => {
+    try {
+      const today = todayISO();
+      const res = await fetch(`/api/notes?tag=dag-${today}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.length > 0) {
+          setNotes(data[0].content ?? "");
+        }
+      }
+    } catch {
+      // Non-critical, notes will be empty
+    }
+  }, []);
+
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+    loadDayNotes();
+  }, [fetchData, loadDayNotes]);
+
+  // Auto-save notes with debounce
+  const saveDayNotes = useCallback(async (content: string) => {
+    setNotesSaving(true);
+    try {
+      const today = todayISO();
+      const tag = `dag-${today}`;
+
+      // Check if a day note already exists
+      const checkRes = await fetch(`/api/notes?tag=${tag}`);
+      if (!checkRes.ok) throw new Error("Feil");
+      const existing = await checkRes.json();
+
+      if (existing.length > 0) {
+        // Update existing note
+        await fetch("/api/notes", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: existing[0].id, content }),
+        });
+      } else if (content.trim()) {
+        // Create new day note
+        await fetch("/api/notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: `Dagens notater ${today}`,
+            content,
+            tags: [tag],
+          }),
+        });
+      }
+      setNotesSaved(true);
+      setTimeout(() => setNotesSaved(false), 2000);
+    } catch {
+      // Silently fail save
+    } finally {
+      setNotesSaving(false);
+    }
+  }, []);
+
+  const handleNotesChange = (value: string) => {
+    setNotes(value);
+    setNotesSaved(false);
+    if (notesTimeoutRef.current) clearTimeout(notesTimeoutRef.current);
+    notesTimeoutRef.current = setTimeout(() => saveDayNotes(value), 1500);
+  };
 
   const toggleTask = async (id: string, currentStatus: string) => {
     const newStatus = currentStatus === "done" ? "todo" : "done";
-    // Optimistic update
     const updateList = (list: Task[]) =>
       list.map((t) => (t.id === id ? { ...t, status: newStatus } : t));
     setTasks(updateList);
@@ -174,11 +245,48 @@ export default function TodayPage() {
       });
       if (!res.ok) throw new Error("Feil ved oppdatering");
     } catch {
-      // Revert on error
       const revertList = (list: Task[]) =>
         list.map((t) => (t.id === id ? { ...t, status: currentStatus } : t));
       setTasks(revertList);
       setOverdueTasks(revertList);
+    }
+  };
+
+  const handlePrioritize = async () => {
+    setAiLoading(true);
+    setAiResult(null);
+    try {
+      const res = await fetch("/api/ai/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: "Hva er viktigst i dag? Prioriter oppgavene mine." }),
+      });
+      if (!res.ok) throw new Error("Feil");
+      const data = await res.json();
+      setAiResult(data.response || "Ingen anbefaling tilgjengelig.");
+    } catch {
+      setAiResult("Kunne ikke hente AI-anbefaling. Sjekk at API-nøkkelen er konfigurert.");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handlePlanDay = async () => {
+    setAiLoading(true);
+    setAiResult(null);
+    try {
+      const res = await fetch("/api/ai/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: "Planlegg dagen min basert på oppgaver og kalender." }),
+      });
+      if (!res.ok) throw new Error("Feil");
+      const data = await res.json();
+      setAiResult(data.response || "Ingen plan tilgjengelig.");
+    } catch {
+      setAiResult("Kunne ikke hente dagplan. Sjekk at API-nøkkelen er konfigurert.");
+    } finally {
+      setAiLoading(false);
     }
   };
 
@@ -240,16 +348,55 @@ export default function TodayPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5">
-            <Sparkles className="h-3.5 w-3.5" />
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={handlePrioritize}
+            disabled={aiLoading}
+          >
+            {aiLoading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
             Hva er viktigst?
           </Button>
-          <Button size="sm" className="gap-1.5">
-            <Target className="h-3.5 w-3.5" />
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={handlePlanDay}
+            disabled={aiLoading}
+          >
+            {aiLoading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Target className="h-3.5 w-3.5" />
+            )}
             Plan min dag
           </Button>
         </div>
       </header>
+
+      {/* AI result */}
+      {aiResult && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="py-4">
+            <div className="flex items-start gap-2">
+              <Sparkles className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+              <p className="text-sm whitespace-pre-wrap">{aiResult}</p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-2 text-xs"
+              onClick={() => setAiResult(null)}
+            >
+              Lukk
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Top 3 Focus */}
       <Card>
@@ -369,7 +516,7 @@ export default function TodayPage() {
                       <p className="text-sm font-medium truncate">{event.title}</p>
                       <p className="text-xs text-muted-foreground">
                         {duration > 0 ? `${duration} min` : ""}
-                        {event.location ? ` • ${event.location}` : ""}
+                        {event.location ? ` \u2022 ${event.location}` : ""}
                       </p>
                     </div>
                     <GripVertical className="h-4 w-4 text-muted-foreground/40 shrink-0 cursor-grab" />
@@ -411,7 +558,10 @@ export default function TodayPage() {
                   </div>
                 ))
               )}
-              <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors pt-1">
+              <button
+                onClick={() => setQuickAddOpen(true)}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors pt-1"
+              >
                 <Plus className="h-3.5 w-3.5" />
                 Legg til oppgave
               </button>
@@ -424,12 +574,18 @@ export default function TodayPage() {
               <CardTitle className="flex items-center gap-2 text-base">
                 <StickyNote className="h-4 w-4 text-primary" />
                 Dagens notater
+                {notesSaving && (
+                  <Save className="h-3 w-3 text-muted-foreground animate-pulse ml-auto" />
+                )}
+                {notesSaved && (
+                  <Check className="h-3 w-3 text-green-500 ml-auto" />
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <textarea
                 value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                onChange={(e) => handleNotesChange(e.target.value)}
                 className="w-full resize-none rounded-md border-0 bg-muted/50 p-3 text-sm leading-relaxed placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring min-h-[120px]"
                 placeholder="Skriv notater for dagen..."
               />
@@ -437,6 +593,12 @@ export default function TodayPage() {
           </Card>
         </div>
       </div>
+
+      <QuickAdd
+        open={quickAddOpen}
+        onOpenChange={setQuickAddOpen}
+        defaultType="task"
+      />
     </div>
   );
 }

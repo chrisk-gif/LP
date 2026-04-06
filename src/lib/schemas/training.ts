@@ -1,5 +1,7 @@
 // =============================================================================
 // Livsplanlegg – Training Zod Schemas
+// Aligned with SQL: workout_sessions(id, user_id, plan_id, title, session_type,
+//   planned_at, completed_at, duration_minutes, intensity, notes, metrics)
 // =============================================================================
 
 import { z } from 'zod';
@@ -15,6 +17,13 @@ export const planTypeSchema = z.enum([
   'cycling',
   'swimming',
   'other',
+]);
+
+export const workoutIntensitySchema = z.enum([
+  'easy',
+  'moderate',
+  'hard',
+  'max',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -53,43 +62,19 @@ export const updateTrainingPlanSchema = z.object({
 export type UpdateTrainingPlanInput = z.infer<typeof updateTrainingPlanSchema>;
 
 // ---------------------------------------------------------------------------
-// Exercise schema (for workout sessions)
-// ---------------------------------------------------------------------------
-
-export const exerciseSchema = z.object({
-  name: z.string().min(1).max(200),
-  sets: z.number().int().positive().optional(),
-  reps: z.number().int().positive().optional(),
-  weight_kg: z.number().nonnegative().optional(),
-  duration_seconds: z.number().int().positive().optional(),
-  distance_km: z.number().nonnegative().optional(),
-  rest_seconds: z.number().int().nonnegative().optional(),
-  notes: z.string().max(1000).nullable().optional(),
-});
-
-export type ExerciseInput = z.infer<typeof exerciseSchema>;
-
-// ---------------------------------------------------------------------------
-// Create workout session
+// Create workout session (matches SQL: workout_sessions)
 // ---------------------------------------------------------------------------
 
 export const createWorkoutSessionSchema = z.object({
-  training_plan_id: z.string().uuid().nullable().optional(),
-  workout_type: z.string().min(1).max(200),
-  title: z.string().max(500).nullable().optional(),
-  description: z.string().max(5000).nullable().optional(),
-  scheduled_date: z.string().date().nullable().optional(),
-  started_at: z.string().datetime().nullable().optional(),
-  ended_at: z.string().datetime().nullable().optional(),
+  plan_id: z.string().uuid().nullable().optional(),
+  title: z.string().min(1, 'Title is required').max(500),
+  session_type: z.string().max(200).nullable().optional(),
+  planned_at: z.string().datetime().nullable().optional(),
+  completed_at: z.string().datetime().nullable().optional(),
   duration_minutes: z.number().int().positive().nullable().optional(),
-  distance_km: z.number().nonnegative().nullable().optional(),
-  calories: z.number().int().nonnegative().nullable().optional(),
-  heart_rate_avg: z.number().int().positive().nullable().optional(),
-  heart_rate_max: z.number().int().positive().nullable().optional(),
-  perceived_effort: z.number().int().min(1).max(10).nullable().optional(),
+  intensity: workoutIntensitySchema.nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
-  exercises: z.array(exerciseSchema).nullable().optional(),
-  is_completed: z.boolean().optional().default(false),
+  metrics: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
 export type CreateWorkoutSessionInput = z.infer<typeof createWorkoutSessionSchema>;
@@ -100,23 +85,15 @@ export type CreateWorkoutSessionInput = z.infer<typeof createWorkoutSessionSchem
 
 export const updateWorkoutSessionSchema = z.object({
   id: z.string().uuid(),
-  training_plan_id: z.string().uuid().nullable().optional(),
-  workout_type: z.string().min(1).max(200).optional(),
-  title: z.string().max(500).nullable().optional(),
-  description: z.string().max(5000).nullable().optional(),
-  scheduled_date: z.string().date().nullable().optional(),
-  started_at: z.string().datetime().nullable().optional(),
-  ended_at: z.string().datetime().nullable().optional(),
-  duration_minutes: z.number().int().positive().nullable().optional(),
-  distance_km: z.number().nonnegative().nullable().optional(),
-  calories: z.number().int().nonnegative().nullable().optional(),
-  heart_rate_avg: z.number().int().positive().nullable().optional(),
-  heart_rate_max: z.number().int().positive().nullable().optional(),
-  perceived_effort: z.number().int().min(1).max(10).nullable().optional(),
-  notes: z.string().max(5000).nullable().optional(),
-  exercises: z.array(exerciseSchema).nullable().optional(),
-  is_completed: z.boolean().optional(),
+  plan_id: z.string().uuid().nullable().optional(),
+  title: z.string().min(1).max(500).optional(),
+  session_type: z.string().max(200).nullable().optional(),
+  planned_at: z.string().datetime().nullable().optional(),
   completed_at: z.string().datetime().nullable().optional(),
+  duration_minutes: z.number().int().positive().nullable().optional(),
+  intensity: workoutIntensitySchema.nullable().optional(),
+  notes: z.string().max(5000).nullable().optional(),
+  metrics: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
 export type UpdateWorkoutSessionInput = z.infer<typeof updateWorkoutSessionSchema>;

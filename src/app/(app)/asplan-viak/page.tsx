@@ -4,7 +4,23 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Briefcase,
   AlertTriangle,
@@ -57,12 +73,13 @@ export default function AsplanViakPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [areaId, setAreaId] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchData() {
       const supabase = createClient();
 
-      // Get area id for asplan-viak
       const { data: areas, error: areaError } = await supabase
         .from("areas")
         .select("id, slug")
@@ -81,19 +98,19 @@ export default function AsplanViakPage() {
         return;
       }
 
-      const areaId = areas[0].id;
+      const aid = areas[0].id;
+      setAreaId(aid);
 
-      // Fetch tenders and tasks in parallel
       const [tendersResult, tasksResult] = await Promise.all([
         supabase
           .from("tenders")
           .select("*")
-          .eq("area_id", areaId)
+          .eq("area_id", aid)
           .order("due_date"),
         supabase
           .from("tasks")
           .select("*")
-          .eq("area_id", areaId)
+          .eq("area_id", aid)
           .in("status", ["inbox", "todo", "in_progress", "waiting"])
           .order("due_date"),
       ]);
@@ -117,6 +134,11 @@ export default function AsplanViakPage() {
 
     fetchData();
   }, []);
+
+  const handleTenderCreated = (tender: Tender) => {
+    setTenders((prev) => [...prev, tender]);
+    setCreateOpen(false);
+  };
 
   if (loading) {
     return (
@@ -150,7 +172,7 @@ export default function AsplanViakPage() {
             Tilbud, oppgaver og arbeidsplan
           </p>
         </div>
-        <Button>
+        <Button onClick={() => setCreateOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Nytt tilbud
         </Button>
@@ -249,7 +271,7 @@ export default function AsplanViakPage() {
                           Sannsynlighet
                         </span>
                         <p className="font-medium">
-                          {tender.probability != null ? `${tender.probability}%` : "—"}
+                          {tender.probability != null ? `${tender.probability}%` : "\u2014"}
                         </p>
                       </div>
                       <div>
@@ -257,10 +279,7 @@ export default function AsplanViakPage() {
                         <p
                           className={`font-medium flex items-center gap-1 ${riskColors[tender.risk_level ?? "medium"]}`}
                         >
-                          {tender.risk_level === "high" && (
-                            <AlertTriangle className="h-3 w-3" />
-                          )}
-                          {tender.risk_level === "critical" && (
+                          {(tender.risk_level === "high" || tender.risk_level === "critical") && (
                             <AlertTriangle className="h-3 w-3" />
                           )}
                           {tender.risk_level === "low"
@@ -271,7 +290,7 @@ export default function AsplanViakPage() {
                                 ? "Høy"
                                 : tender.risk_level === "critical"
                                   ? "Kritisk"
-                                  : "—"}
+                                  : "\u2014"}
                         </p>
                       </div>
                     </div>
@@ -321,7 +340,7 @@ export default function AsplanViakPage() {
         </TabsContent>
 
         <TabsContent value="deadlines" className="space-y-2 mt-4">
-          {tenders.length === 0 ? (
+          {tenders.filter((t) => t.due_date).length === 0 ? (
             <p className="text-muted-foreground">Ingen tilbud med frister.</p>
           ) : (
             [...tenders]
@@ -355,6 +374,160 @@ export default function AsplanViakPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Create tender dialog */}
+      <CreateTenderDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        areaId={areaId}
+        onCreated={handleTenderCreated}
+      />
     </div>
+  );
+}
+
+function CreateTenderDialog({
+  open,
+  onOpenChange,
+  areaId,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  areaId: string | null;
+  onCreated: (tender: Tender) => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [client, setClient] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [riskLevel, setRiskLevel] = useState("medium");
+  const [probability, setProbability] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      setFormError("Tittel er påkrevd");
+      return;
+    }
+
+    setSubmitting(true);
+    setFormError(null);
+
+    try {
+      const res = await fetch("/api/tenders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          client: client.trim() || null,
+          area_id: areaId,
+          status: "identified",
+          due_date: dueDate || null,
+          risk_level: riskLevel,
+          probability: probability ? parseInt(probability) : null,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Kunne ikke opprette tilbud");
+      }
+
+      const data = await res.json();
+      onCreated(data);
+      // Reset
+      setTitle("");
+      setClient("");
+      setDueDate("");
+      setRiskLevel("medium");
+      setProbability("");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Noe gikk galt");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Nytt tilbud</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="tender-title">Tittel</Label>
+            <Input
+              id="tender-title"
+              placeholder="F.eks. Reguleringsplan Torget"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="tender-client">Oppdragsgiver</Label>
+            <Input
+              id="tender-client"
+              placeholder="F.eks. Bærum kommune"
+              value={client}
+              onChange={(e) => setClient(e.target.value)}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="tender-due-date">Frist</Label>
+              <Input
+                id="tender-due-date"
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tender-probability">Sannsynlighet (%)</Label>
+              <Input
+                id="tender-probability"
+                type="number"
+                min="0"
+                max="100"
+                value={probability}
+                onChange={(e) => setProbability(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Risikonivå</Label>
+            <Select value={riskLevel} onValueChange={setRiskLevel}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">Lav</SelectItem>
+                <SelectItem value="medium">Middels</SelectItem>
+                <SelectItem value="high">Høy</SelectItem>
+                <SelectItem value="critical">Kritisk</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {formError && (
+            <p className="text-sm text-destructive">{formError}</p>
+          )}
+
+          <DialogFooter>
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Opprett tilbud
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

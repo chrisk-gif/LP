@@ -12,8 +12,8 @@ import {
   ArrowRight,
   CheckCircle,
   Loader2,
+  AlertCircle,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 
 interface InboxItem {
   id: string;
@@ -35,19 +35,21 @@ export default function InboxPage() {
   const [newItem, setNewItem] = useState("");
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
-
-  const supabase = createClient();
+  const [error, setError] = useState<string | null>(null);
 
   const fetchItems = useCallback(async () => {
-    const { data } = await supabase
-      .from("inbox_items")
-      .select("id, content, item_type, source, processed, created_at")
-      .order("created_at", { ascending: false });
-    if (data) {
+    try {
+      setError(null);
+      const res = await fetch("/api/inbox");
+      if (!res.ok) throw new Error("Kunne ikke hente innboks");
+      const data: InboxItem[] = await res.json();
       setItems(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ukjent feil");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  }, [supabase]);
+  }, []);
 
   useEffect(() => {
     fetchItems();
@@ -56,40 +58,67 @@ export default function InboxPage() {
   const handleAdd = async () => {
     if (!newItem.trim() || adding) return;
     setAdding(true);
-    const { data, error } = await supabase
-      .from("inbox_items")
-      .insert({ content: newItem.trim(), source: "manual" })
-      .select("id, content, item_type, source, processed, created_at")
-      .single();
+    setError(null);
 
-    if (data && !error) {
+    try {
+      const res = await fetch("/api/inbox", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: newItem.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Kunne ikke legge til element");
+      }
+      const data: InboxItem = await res.json();
       setItems((prev) => [data, ...prev]);
       setNewItem("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Kunne ikke legge til");
+    } finally {
+      setAdding(false);
     }
-    setAdding(false);
   };
 
   const handleProcess = async (id: string) => {
-    const { error } = await supabase
-      .from("inbox_items")
-      .update({ processed: true, processed_at: new Date().toISOString() })
-      .eq("id", id);
+    // Optimistic update
+    setItems((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, processed: true } : i))
+    );
 
-    if (!error) {
+    try {
+      const res = await fetch("/api/inbox", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          processed: true,
+          processed_at: new Date().toISOString(),
+        }),
+      });
+      if (!res.ok) throw new Error("Feil ved behandling");
+    } catch {
+      // Revert on error
       setItems((prev) =>
-        prev.map((i) => (i.id === id ? { ...i, processed: true } : i))
+        prev.map((i) => (i.id === id ? { ...i, processed: false } : i))
       );
     }
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase
-      .from("inbox_items")
-      .delete()
-      .eq("id", id);
+    const prevItems = items;
+    setItems((prev) => prev.filter((i) => i.id !== id));
 
-    if (!error) {
-      setItems((prev) => prev.filter((i) => i.id !== id));
+    try {
+      const res = await fetch("/api/inbox", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) throw new Error("Feil ved sletting");
+    } catch {
+      // Revert on error
+      setItems(prevItems);
     }
   };
 
@@ -117,15 +146,22 @@ export default function InboxPage() {
             )}
           </h1>
           <p className="text-muted-foreground">
-            Fang tanker, ideer og paminnelser
+            Fang tanker, ideer og påminnelser
           </p>
         </div>
       </div>
 
+      {error && (
+        <div className="flex items-center gap-2 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4" />
+          {error}
+        </div>
+      )}
+
       {/* Quick capture */}
       <div className="flex gap-2">
         <Input
-          placeholder="Skriv noe a huske..."
+          placeholder="Skriv noe å huske..."
           value={newItem}
           onChange={(e) => setNewItem(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}

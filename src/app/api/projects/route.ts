@@ -1,0 +1,61 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createProjectSchema } from "@/lib/schemas/project";
+
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = await createServerSupabaseClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const searchParams = request.nextUrl.searchParams;
+    const status = searchParams.get("status");
+    const area_id = searchParams.get("area_id");
+
+    let query = supabase
+      .from("projects")
+      .select("*, areas(name, slug, color)")
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: false });
+
+    if (status) query = query.eq("status", status);
+    if (area_id) query = query.eq("area_id", area_id);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error("Projects GET error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const supabase = await createServerSupabaseClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const body = await request.json();
+    const parsed = createProjectSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: parsed.error.flatten().fieldErrors },
+        { status: 400 }
+      );
+    }
+
+    const { data, error } = await supabase
+      .from("projects")
+      .insert({ ...parsed.data, user_id: user.id })
+      .select("*, areas(name, slug, color)")
+      .single();
+
+    if (error) throw error;
+    return NextResponse.json(data, { status: 201 });
+  } catch (error) {
+    console.error("Projects POST error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}

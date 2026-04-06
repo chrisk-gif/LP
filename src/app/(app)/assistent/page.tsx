@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,21 @@ import {
   CheckCircle,
   AlertCircle,
   Loader2,
+  XCircle,
+  ShieldCheck,
 } from "lucide-react";
+import { useVoice } from "@/hooks/useVoice";
+
+interface ToolCall {
+  name: string;
+  input: Record<string, unknown>;
+}
+
+interface ActionInfo {
+  action: string;
+  status: string;
+  message?: string;
+}
 
 interface Message {
   id: string;
@@ -24,14 +38,16 @@ interface Message {
   timestamp: Date;
   intent?: string;
   confidence?: number;
-  actions?: Array<{ action: string; status: string }>;
+  actions?: ActionInfo[];
   isVoice?: boolean;
+  confirmationRequired?: boolean;
+  toolCalls?: ToolCall[];
 }
 
 const exampleCommands = [
   "Hva er viktigst i dag?",
-  "Legg inn møte med byggherre onsdag klokken 14",
-  "Gi meg status på aktive tilbud",
+  "Legg inn mote med byggherre onsdag klokken 14",
+  "Gi meg status pa aktive tilbud",
   "Lag en oppgave: ferdigstille prismatrise innen fredag",
   "Marker faktura fra Hafslund som betalt",
   "Jeg trente styrke i 45 minutter i dag",
@@ -45,64 +61,145 @@ export default function AssistantPage() {
       id: "welcome",
       role: "assistant",
       content:
-        "Hei! Jeg er din personlige assistent. Jeg kan hjelpe deg med oppgaver, kalender, tilbud, økonomi, trening og mer. Hva kan jeg hjelpe deg med?",
+        "Hei! Jeg er din personlige assistent. Jeg kan hjelpe deg med oppgaver, kalender, tilbud, okonomi, trening og mer. Hva kan jeg hjelpe deg med?",
       timestamp: new Date(),
     },
   ]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    messageId: string;
+    toolCalls: ToolCall[];
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const voice = useVoice();
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+  // When voice transcript completes, send it as input
+  useEffect(() => {
+    if (voice.transcript && !voice.isListening) {
+      setInput(voice.transcript);
+      voice.reset();
+    }
+  }, [voice.isListening, voice.transcript, voice.reset]);
 
-    const userMessage: Message = {
-      id: String(Date.now()),
-      role: "user",
-      content: input.trim(),
-      timestamp: new Date(),
-    };
+  const sendCommand = useCallback(
+    async (text: string, isVoice = false) => {
+      if (!text.trim() || isLoading) return;
 
-    setMessages((prev) => [...prev, userMessage]);
-    setInput("");
+      const userMessage: Message = {
+        id: String(Date.now()),
+        role: "user",
+        content: text.trim(),
+        timestamp: new Date(),
+        isVoice,
+      };
+
+      setMessages((prev) => [...prev, userMessage]);
+      setInput("");
+      setIsLoading(true);
+
+      try {
+        const response = await fetch("/api/ai/command", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input: text.trim() }),
+        });
+
+        if (!response.ok) throw new Error("Feil ved AI-forespørsel");
+
+        const data = await response.json();
+
+        const assistantMessage: Message = {
+          id: String(Date.now() + 1),
+          role: "assistant",
+          content: data.response || data.explanation || "Utført.",
+          timestamp: new Date(),
+          intent: data.intent,
+          confidence: data.confidence,
+          actions: data.actions,
+          confirmationRequired: data.confirmationRequired,
+          toolCalls: data.toolCalls,
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+
+        // If confirmation is required and there are pending tool calls
+        if (
+          data.confirmationRequired &&
+          data.toolCalls &&
+          data.toolCalls.length > 0
+        ) {
+          setPendingConfirmation({
+            messageId: assistantMessage.id,
+            toolCalls: data.toolCalls,
+          });
+        }
+      } catch {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: String(Date.now() + 1),
+            role: "assistant",
+            content:
+              "Beklager, jeg kunne ikke behandle forespørselen. Prøv igjen eller sjekk at API-nøkkelen er konfigurert.",
+            timestamp: new Date(),
+          },
+        ]);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [isLoading]
+  );
+
+  const handleSend = () => {
+    sendCommand(input);
+  };
+
+  const handleConfirm = async () => {
+    if (!pendingConfirmation || isLoading) return;
     setIsLoading(true);
+    const { toolCalls } = pendingConfirmation;
+    setPendingConfirmation(null);
 
     try {
       const response = await fetch("/api/ai/command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: userMessage.content }),
+        body: JSON.stringify({
+          confirm: true,
+          pendingToolCalls: toolCalls,
+        }),
       });
 
-      if (!response.ok) throw new Error("Feil ved AI-forespørsel");
+      if (!response.ok) throw new Error("Feil ved bekreftelse");
 
       const data = await response.json();
 
-      const assistantMessage: Message = {
-        id: String(Date.now() + 1),
+      const resultMessage: Message = {
+        id: String(Date.now()),
         role: "assistant",
-        content: data.response || data.explanation || "Utført.",
+        content: data.response || "Handlinger utført.",
         timestamp: new Date(),
         intent: data.intent,
         confidence: data.confidence,
         actions: data.actions,
       };
 
-      setMessages((prev) => [...prev, assistantMessage]);
+      setMessages((prev) => [...prev, resultMessage]);
     } catch {
       setMessages((prev) => [
         ...prev,
         {
-          id: String(Date.now() + 1),
+          id: String(Date.now()),
           role: "assistant",
-          content:
-            "Beklager, jeg kunne ikke behandle forespørselen. Prøv igjen eller sjekk at API-nøkkelen er konfigurert.",
+          content: "Beklager, bekreftelsen feilet. Prøv igjen.",
           timestamp: new Date(),
         },
       ]);
@@ -111,23 +208,62 @@ export default function AssistantPage() {
     }
   };
 
-  const toggleRecording = () => {
-    setIsRecording(!isRecording);
-    // Voice recording is handled by the VoiceRecorder component
-    // This is a simplified toggle for the assistant page
-    if (!isRecording) {
-      // Start recording - integrate with voice system
+  const handleCancel = () => {
+    setPendingConfirmation(null);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: String(Date.now()),
+        role: "system",
+        content: "Handlingen ble avbrutt.",
+        timestamp: new Date(),
+      },
+    ]);
+  };
+
+  const toggleVoice = () => {
+    if (!voice.capabilities.speechRecognition) {
       setMessages((prev) => [
         ...prev,
         {
           id: String(Date.now()),
           role: "system",
-          content: "Lytter... Snakk nå.",
+          content:
+            "Talegjenkjenning er ikke tilgjengelig i denne nettleseren. Bruk Chrome eller Edge for stemmekommandoer.",
           timestamp: new Date(),
         },
       ]);
+      return;
+    }
+
+    if (voice.isListening) {
+      voice.stopListening();
+    } else {
+      voice.reset();
+      voice.startListening();
     }
   };
+
+  function formatToolCallDescription(tc: ToolCall): string {
+    const labels: Record<string, string> = {
+      create_task: "Opprett oppgave",
+      create_event: "Opprett hendelse",
+      complete_task: "Fullfør oppgave",
+      create_finance_item: "Opprett finanspost",
+      mark_paid: "Merk som betalt",
+      log_workout: "Logg trening",
+      create_note: "Opprett notat",
+      query_data: "Hent data",
+      reschedule: "Flytt",
+    };
+    const label = labels[tc.name] ?? tc.name;
+    const title =
+      (tc.input.title as string) ??
+      (tc.input.task_title_search as string) ??
+      (tc.input.search_term as string) ??
+      "";
+    return title ? `${label}: ${title}` : label;
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
@@ -169,7 +305,7 @@ export default function AssistantPage() {
                       <Badge variant="outline" className="text-xs">
                         {message.intent}
                       </Badge>
-                      {message.confidence && (
+                      {message.confidence != null && (
                         <span className="text-xs text-muted-foreground">
                           {Math.round(message.confidence * 100)}% sikkerhet
                         </span>
@@ -188,11 +324,60 @@ export default function AssistantPage() {
                           ) : (
                             <AlertCircle className="h-3 w-3 text-yellow-500" />
                           )}
-                          {action.action}
+                          <span>{action.message ?? action.action}</span>
                         </div>
                       ))}
                     </div>
                   )}
+                  {/* Pending confirmation indicator */}
+                  {message.confirmationRequired &&
+                    message.toolCalls &&
+                    message.toolCalls.length > 0 &&
+                    pendingConfirmation?.messageId === message.id && (
+                      <div className="mt-3 p-3 rounded-md border border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-950/30">
+                        <div className="flex items-center gap-2 mb-2">
+                          <ShieldCheck className="h-4 w-4 text-yellow-600" />
+                          <span className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                            Bekreftelse kreves
+                          </span>
+                        </div>
+                        <div className="space-y-1 mb-3">
+                          {message.toolCalls.map((tc, i) => (
+                            <div
+                              key={i}
+                              className="text-xs text-yellow-700 dark:text-yellow-300"
+                            >
+                              {formatToolCallDescription(tc)}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={handleConfirm}
+                            disabled={isLoading}
+                            className="gap-1"
+                          >
+                            {isLoading ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <CheckCircle className="h-3 w-3" />
+                            )}
+                            Bekreft
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleCancel}
+                            disabled={isLoading}
+                            className="gap-1"
+                          >
+                            <XCircle className="h-3 w-3" />
+                            Avbryt
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   <span className="text-xs opacity-50 mt-1 block">
                     {message.timestamp.toLocaleTimeString("nb-NO", {
                       hour: "2-digit",
@@ -208,7 +393,7 @@ export default function AssistantPage() {
               )}
             </div>
           ))}
-          {isLoading && (
+          {isLoading && !pendingConfirmation && (
             <div className="flex gap-3">
               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
                 <Bot className="h-4 w-4" />
@@ -246,15 +431,34 @@ export default function AssistantPage() {
         </div>
       )}
 
+      {/* Voice status */}
+      {voice.isListening && (
+        <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+          </span>
+          {voice.interimTranscript
+            ? `Hører: ${voice.interimTranscript}`
+            : "Lytter... Snakk nå."}
+        </div>
+      )}
+
       {/* Input area */}
       <div className="flex gap-2 pt-4 border-t">
         <Button
-          variant={isRecording ? "destructive" : "outline"}
+          variant={voice.isListening ? "destructive" : "outline"}
           size="icon"
-          onClick={toggleRecording}
-          title={isRecording ? "Stopp opptak" : "Start stemmekommando"}
+          onClick={toggleVoice}
+          title={
+            !voice.capabilities.speechRecognition
+              ? "Talegjenkjenning ikke tilgjengelig i denne nettleseren"
+              : voice.isListening
+                ? "Stopp opptak"
+                : "Start stemmekommando"
+          }
         >
-          {isRecording ? (
+          {voice.isListening ? (
             <MicOff className="h-4 w-4" />
           ) : (
             <Mic className="h-4 w-4" />

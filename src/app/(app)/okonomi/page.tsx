@@ -411,39 +411,50 @@ function CreateFinanceDialog({
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [formTitle, setFormTitle] = useState("");
+  const [formType, setFormType] = useState<string>("bill");
+  const [formAmount, setFormAmount] = useState("");
+  const [formVendor, setFormVendor] = useState("");
+  const [formCategory, setFormCategory] = useState("");
+  const [formDueDate, setFormDueDate] = useState("");
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setSubmitting(true);
     setFormError(null);
 
-    const formData = new FormData(e.currentTarget);
-    const title = formData.get("title") as string;
-    const type = formData.get("type") as string;
-    const amountStr = formData.get("amount") as string;
-    const vendor = formData.get("vendor") as string;
-    const category = formData.get("category") as string;
-    const dueDate = formData.get("due_date") as string;
-
-    if (!title.trim()) {
+    if (!formTitle.trim()) {
       setFormError("Tittel er påkrevd");
       setSubmitting(false);
       return;
     }
 
+    if (!formType) {
+      setFormError("Velg en type");
+      setSubmitting(false);
+      return;
+    }
+
     const payload: Record<string, unknown> = {
-      title: title.trim(),
-      type,
+      title: formTitle.trim(),
+      type: formType,
       status: "upcoming",
     };
 
-    if (amountStr) payload.amount = parseFloat(amountStr);
-    if (vendor) payload.vendor = vendor;
-    if (category) payload.category = category;
-    if (dueDate) payload.due_date = dueDate;
+    if (formAmount) payload.amount = parseFloat(formAmount);
+    if (formVendor) payload.vendor = formVendor;
+    if (formCategory) payload.category = formCategory;
+    if (formDueDate) payload.due_date = formDueDate;
 
     try {
       await onSubmit(payload);
+      // Reset form on success
+      setFormTitle("");
+      setFormType("bill");
+      setFormAmount("");
+      setFormVendor("");
+      setFormCategory("");
+      setFormDueDate("");
     } catch {
       setFormError("Kunne ikke opprette post. Prøv igjen.");
     } finally {
@@ -458,14 +469,20 @@ function CreateFinanceDialog({
       </DialogHeader>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="title">Tittel</Label>
-          <Input id="title" name="title" placeholder="F.eks. Strøm - Tibber" required />
+          <Label htmlFor="finance-title">Tittel</Label>
+          <Input
+            id="finance-title"
+            placeholder="F.eks. Strøm - Tibber"
+            value={formTitle}
+            onChange={(e) => setFormTitle(e.target.value)}
+            required
+          />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="type">Type</Label>
-            <Select name="type" defaultValue="bill">
+            <Label>Type</Label>
+            <Select value={formType} onValueChange={setFormType}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -481,32 +498,48 @@ function CreateFinanceDialog({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="amount">Beløp (kr)</Label>
+            <Label htmlFor="finance-amount">Beløp (kr)</Label>
             <Input
-              id="amount"
-              name="amount"
+              id="finance-amount"
               type="number"
               min="0"
               step="0.01"
               placeholder="0"
+              value={formAmount}
+              onChange={(e) => setFormAmount(e.target.value)}
             />
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="vendor">Leverandør</Label>
-            <Input id="vendor" name="vendor" placeholder="F.eks. Tibber" />
+            <Label htmlFor="finance-vendor">Leverandør</Label>
+            <Input
+              id="finance-vendor"
+              placeholder="F.eks. Tibber"
+              value={formVendor}
+              onChange={(e) => setFormVendor(e.target.value)}
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="category">Kategori</Label>
-            <Input id="category" name="category" placeholder="F.eks. Bolig" />
+            <Label htmlFor="finance-category">Kategori</Label>
+            <Input
+              id="finance-category"
+              placeholder="F.eks. Bolig"
+              value={formCategory}
+              onChange={(e) => setFormCategory(e.target.value)}
+            />
           </div>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="due_date">Forfallsdato</Label>
-          <Input id="due_date" name="due_date" type="date" />
+          <Label htmlFor="finance-due-date">Forfallsdato</Label>
+          <Input
+            id="finance-due-date"
+            type="date"
+            value={formDueDate}
+            onChange={(e) => setFormDueDate(e.target.value)}
+          />
         </div>
 
         {formError && (

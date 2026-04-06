@@ -27,16 +27,16 @@ import {
   Plus,
   FileText,
   CreditCard,
-  Clock,
   ArrowRight,
 } from "lucide-react";
 
 interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onQuickAdd?: (type: string) => void;
 }
 
-export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+export function CommandPalette({ open, onOpenChange, onQuickAdd }: CommandPaletteProps) {
   const router = useRouter();
 
   // Global Ctrl+K handler
@@ -60,6 +60,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     command();
   }
 
+  function handleQuickAction(type: string) {
+    runCommand(() => {
+      if (onQuickAdd) {
+        onQuickAdd(type);
+      }
+    });
+  }
+
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
       <CommandInput placeholder="Søk oppgaver, hendelser, prosjekter..." />
@@ -68,43 +76,19 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
         {/* Quick actions */}
         <CommandGroup heading="Hurtighandlinger">
-          <CommandItem
-            onSelect={() =>
-              runCommand(() => {
-                /* dispatch quick-add task */
-              })
-            }
-          >
+          <CommandItem onSelect={() => handleQuickAction("task")}>
             <Plus className="mr-2 h-4 w-4" />
             Ny oppgave
           </CommandItem>
-          <CommandItem
-            onSelect={() =>
-              runCommand(() => {
-                /* dispatch quick-add event */
-              })
-            }
-          >
+          <CommandItem onSelect={() => handleQuickAction("event")}>
             <Calendar className="mr-2 h-4 w-4" />
             Ny hendelse
           </CommandItem>
-          <CommandItem
-            onSelect={() =>
-              runCommand(() => {
-                /* dispatch quick-add note */
-              })
-            }
-          >
+          <CommandItem onSelect={() => handleQuickAction("note")}>
             <FileText className="mr-2 h-4 w-4" />
             Nytt notat
           </CommandItem>
-          <CommandItem
-            onSelect={() =>
-              runCommand(() => {
-                /* dispatch quick-add bill */
-              })
-            }
-          >
+          <CommandItem onSelect={() => handleQuickAction("bill")}>
             <CreditCard className="mr-2 h-4 w-4" />
             Ny regning
           </CommandItem>
@@ -182,18 +166,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           >
             <Bot className="mr-2 h-4 w-4" />
             Assistent
-          </CommandItem>
-        </CommandGroup>
-
-        <CommandSeparator />
-
-        {/* Recent */}
-        <CommandGroup heading="Siste handlinger">
-          <CommandItem>
-            <Clock className="mr-2 h-4 w-4 text-muted-foreground" />
-            <span className="text-muted-foreground">
-              Ingen nylige handlinger
-            </span>
           </CommandItem>
         </CommandGroup>
       </CommandList>

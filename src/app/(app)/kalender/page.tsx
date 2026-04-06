@@ -29,6 +29,23 @@ import {
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { MonthView } from "@/components/calendar/MonthView";
 import { DayView } from "@/components/calendar/DayView";
@@ -37,8 +54,6 @@ import {
   type CalendarEvent,
   type CalendarTask,
 } from "@/components/calendar/EventCard";
-import { cn as _cn } from "@/lib/utils";
-void _cn;
 
 // ==========================================================================
 // View types
@@ -253,6 +268,9 @@ export default function KalenderPage() {
   const [tasks, setTasks] = useState<CalendarTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createDefaults, setCreateDefaults] = useState<{ date?: Date; hour?: number }>({});
+  const [viewEvent, setViewEvent] = useState<CalendarEvent | null>(null);
 
   // Compute date range for the current view
   const dateRange = useMemo(
@@ -370,14 +388,13 @@ export default function KalenderPage() {
     }
   }
 
-  // TODO: Open a create-event dialog when a time slot is clicked
   function handleSlotClick(date: Date, hour: number) {
-    console.log("Create event at", date, hour);
+    setCreateDefaults({ date, hour });
+    setCreateDialogOpen(true);
   }
 
-  // TODO: Open an event detail/edit dialog when an event is clicked
   function handleEventClick(event: CalendarEvent) {
-    console.log("View event", event);
+    setViewEvent(event);
   }
 
   function handleDayClick(date: Date) {
@@ -493,6 +510,353 @@ export default function KalenderPage() {
           )}
         </>
       )}
+
+      {/* Create event dialog */}
+      <CreateEventDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        defaults={createDefaults}
+        onCreated={(newEvent) => {
+          setEvents((prev) => [...prev, newEvent]);
+          setCreateDialogOpen(false);
+        }}
+      />
+
+      {/* View/edit event dialog */}
+      <ViewEventDialog
+        event={viewEvent}
+        onClose={() => setViewEvent(null)}
+        onUpdated={(updated) => {
+          setEvents((prev) =>
+            prev.map((e) => (e.id === updated.id ? updated : e))
+          );
+          setViewEvent(null);
+        }}
+        onDeleted={(id) => {
+          setEvents((prev) => prev.filter((e) => e.id !== id));
+          setViewEvent(null);
+        }}
+      />
     </div>
+  );
+}
+
+// ==========================================================================
+// Create event dialog
+// ==========================================================================
+
+function CreateEventDialog({
+  open,
+  onOpenChange,
+  defaults,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  defaults: { date?: Date; hour?: number };
+  onCreated: (event: CalendarEvent) => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [eventType, setEventType] = useState("meeting");
+  const [startDate, setStartDate] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [location, setLocation] = useState("");
+
+  useEffect(() => {
+    if (open && defaults.date) {
+      setStartDate(format(defaults.date, "yyyy-MM-dd"));
+      if (defaults.hour != null) {
+        const h = String(defaults.hour).padStart(2, "0");
+        setStartTime(`${h}:00`);
+        const endH = String(Math.min(defaults.hour + 1, 23)).padStart(2, "0");
+        setEndTime(`${endH}:00`);
+      }
+    }
+  }, [open, defaults]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      setFormError("Tittel er påkrevd");
+      return;
+    }
+    if (!startDate || !startTime) {
+      setFormError("Dato og starttid er påkrevd");
+      return;
+    }
+
+    setSubmitting(true);
+    setFormError(null);
+
+    try {
+      const startIso = new Date(`${startDate}T${startTime}:00`).toISOString();
+      const endIso = endTime
+        ? new Date(`${startDate}T${endTime}:00`).toISOString()
+        : new Date(new Date(startIso).getTime() + 3600000).toISOString();
+
+      const res = await fetch("/api/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim() || null,
+          event_type: eventType,
+          start_time: startIso,
+          end_time: endIso,
+          location: location.trim() || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Kunne ikke opprette hendelse");
+      }
+
+      const raw = await res.json();
+      onCreated(mapApiEvent(raw));
+      setTitle("");
+      setDescription("");
+      setEventType("meeting");
+      setStartDate("");
+      setStartTime("");
+      setEndTime("");
+      setLocation("");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Noe gikk galt");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Ny hendelse</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="event-title">Tittel</Label>
+            <Input
+              id="event-title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="F.eks. Møte med prosjektleder"
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Type</Label>
+            <Select value={eventType} onValueChange={setEventType}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="meeting">Møte</SelectItem>
+                <SelectItem value="deadline">Frist</SelectItem>
+                <SelectItem value="reminder">Påminnelse</SelectItem>
+                <SelectItem value="block">Fokustid</SelectItem>
+                <SelectItem value="personal">Personlig</SelectItem>
+                <SelectItem value="other">Annet</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-2">
+              <Label htmlFor="event-date">Dato</Label>
+              <Input
+                id="event-date"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="event-start">Start</Label>
+              <Input
+                id="event-start"
+                type="time"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="event-end">Slutt</Label>
+              <Input
+                id="event-end"
+                type="time"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="event-location">Sted (valgfritt)</Label>
+            <Input
+              id="event-location"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder="F.eks. Møterom 3"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="event-desc">Beskrivelse (valgfritt)</Label>
+            <Textarea
+              id="event-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+            />
+          </div>
+
+          {formError && (
+            <p className="text-sm text-destructive">{formError}</p>
+          )}
+
+          <DialogFooter>
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Loader2 className="size-4 animate-spin mr-2" />}
+              Opprett
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ==========================================================================
+// View/edit event dialog
+// ==========================================================================
+
+function ViewEventDialog({
+  event,
+  onClose,
+  onUpdated,
+  onDeleted,
+}: {
+  event: CalendarEvent | null;
+  onClose: () => void;
+  onUpdated: (event: CalendarEvent) => void;
+  onDeleted: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [location, setLocation] = useState("");
+
+  useEffect(() => {
+    if (event) {
+      setTitle(event.title);
+      setDescription(event.description ?? "");
+      setLocation(event.location ?? "");
+      setEditing(false);
+    }
+  }, [event]);
+
+  if (!event) return null;
+
+  const handleSave = async () => {
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/events", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: event.id,
+          title: title.trim(),
+          description: description.trim() || null,
+          location: location.trim() || null,
+        }),
+      });
+      if (!res.ok) throw new Error("Feil ved oppdatering");
+      const updated = await res.json();
+      onUpdated(mapApiEvent(updated));
+    } catch {
+      // stay in edit mode
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/events?id=${event.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Feil ved sletting");
+      onDeleted(event.id);
+    } catch {
+      // stay open
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!event} onOpenChange={() => onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{editing ? "Rediger hendelse" : "Hendelse"}</DialogTitle>
+        </DialogHeader>
+
+        {editing ? (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Tittel</Label>
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Sted</Label>
+              <Input value={location} onChange={(e) => setLocation(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Beskrivelse</Label>
+              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="ghost" onClick={() => setEditing(false)} disabled={submitting}>
+                Avbryt
+              </Button>
+              <Button onClick={handleSave} disabled={submitting}>
+                {submitting && <Loader2 className="size-4 animate-spin mr-2" />}
+                Lagre
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold">{event.title}</h3>
+            <div className="text-sm text-muted-foreground space-y-1">
+              <p>
+                {format(parseISO(event.start_time), "EEEE d. MMMM yyyy", { locale: nb })}
+              </p>
+              <p>
+                {format(parseISO(event.start_time), "HH:mm", { locale: nb })}
+                {event.end_time && ` \u2013 ${format(parseISO(event.end_time), "HH:mm", { locale: nb })}`}
+              </p>
+              {event.location && <p>Sted: {event.location}</p>}
+              {event.description && <p className="mt-2">{event.description}</p>}
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="destructive" size="sm" onClick={handleDelete} disabled={submitting}>
+                Slett
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                Rediger
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

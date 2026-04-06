@@ -6,6 +6,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Rocket, Plus, TrendingUp, Loader2, Target } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -44,6 +54,8 @@ export default function YtlyPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [areaId, setAreaId] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -66,6 +78,7 @@ export default function YtlyPage() {
       }
 
       const areaId = areas[0].id;
+      setAreaId(areaId);
 
       const [projectsResult, tasksResult, goalsResult] = await Promise.all([
         supabase
@@ -142,7 +155,7 @@ export default function YtlyPage() {
             Strategi, initiativer og gjennomføring
           </p>
         </div>
-        <Button>
+        <Button onClick={() => setCreateOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Nytt initiativ
         </Button>
@@ -341,6 +354,115 @@ export default function YtlyPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      <CreateProjectDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        areaId={areaId}
+        onCreated={(project) => {
+          setProjects((prev) => [project, ...prev]);
+          setCreateOpen(false);
+        }}
+      />
     </div>
+  );
+}
+
+function CreateProjectDialog({
+  open,
+  onOpenChange,
+  areaId,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  areaId: string | null;
+  onCreated: (project: Project) => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      setFormError("Tittel er påkrevd");
+      return;
+    }
+
+    setSubmitting(true);
+    setFormError(null);
+
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim() || null,
+          area_id: areaId,
+          status: "active",
+          priority: "medium",
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Kunne ikke opprette prosjekt");
+      }
+
+      const data = await res.json();
+      onCreated(data);
+      setTitle("");
+      setDescription("");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Noe gikk galt");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Nytt initiativ</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="project-title">Tittel</Label>
+            <Input
+              id="project-title"
+              placeholder="F.eks. Ny landingsside"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="project-desc">Beskrivelse (valgfritt)</Label>
+            <Textarea
+              id="project-desc"
+              placeholder="Beskriv initiativet..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+            />
+          </div>
+
+          {formError && (
+            <p className="text-sm text-destructive">{formError}</p>
+          )}
+
+          <DialogFooter>
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Opprett
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

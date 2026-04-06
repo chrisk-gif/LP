@@ -63,6 +63,7 @@ export function TopBar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickAddType, setQuickAddType] = useState<string | undefined>();
   const [darkMode, setDarkMode] = useState(false);
   const [profile, setProfile] = useState<UserProfile>({
     displayName: "",
@@ -224,8 +225,22 @@ export function TopBar() {
       </header>
 
       {/* Dialogs */}
-      <CommandPalette open={commandOpen} onOpenChange={setCommandOpen} />
-      <QuickAdd open={quickAddOpen} onOpenChange={setQuickAddOpen} />
+      <CommandPalette
+        open={commandOpen}
+        onOpenChange={setCommandOpen}
+        onQuickAdd={(type) => {
+          setQuickAddType(type);
+          setQuickAddOpen(true);
+        }}
+      />
+      <QuickAdd
+        open={quickAddOpen}
+        onOpenChange={(open) => {
+          setQuickAddOpen(open);
+          if (!open) setQuickAddType(undefined);
+        }}
+        defaultType={quickAddType}
+      />
     </>
   );
 }

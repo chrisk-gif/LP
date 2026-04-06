@@ -45,7 +45,8 @@ export async function POST(request: NextRequest) {
         const result: ExecutionResult = await executeToolCall(
           tc.name,
           tc.input,
-          user.id
+          user.id,
+          { confidence: 1.0, autoExecuted: false, confirmedByUser: true }
         );
         actions.push({
           action: tc.name,
@@ -91,7 +92,22 @@ export async function POST(request: NextRequest) {
         success: result.intent !== "unknown",
       });
     } catch {
-      console.error("Failed to log AI run");
+      // best-effort logging
+    }
+
+    // Fetch user's ai_auto_execute preference
+    let userAutoExecute = false;
+    try {
+      const { data: prefs } = await supabase
+        .from("user_preferences")
+        .select("ai_auto_execute")
+        .eq("user_id", user.id)
+        .single();
+      if (prefs) {
+        userAutoExecute = prefs.ai_auto_execute === true;
+      }
+    } catch {
+      // Default to false if fetch fails
     }
 
     // Determine whether to auto-execute
@@ -99,8 +115,17 @@ export async function POST(request: NextRequest) {
       result.toolCalls && result.toolCalls.length > 0;
     const highConfidence =
       result.confidence >= CONFIDENCE_THRESHOLDS.HIGH;
+
+    // Read-only queries can always execute (no write side-effects)
+    const isReadOnly = result.toolCalls?.every(
+      (tc) => tc.name === "query_data"
+    ) ?? false;
+
     const canAutoExecute =
-      hasToolCalls && highConfidence && !result.confirmationRequired;
+      hasToolCalls &&
+      highConfidence &&
+      !result.confirmationRequired &&
+      (isReadOnly || userAutoExecute);
 
     if (canAutoExecute && result.toolCalls) {
       // Auto-execute the tool calls
@@ -111,7 +136,12 @@ export async function POST(request: NextRequest) {
         const execResult: ExecutionResult = await executeToolCall(
           tc.name,
           tc.input,
-          user.id
+          user.id,
+          {
+            confidence: result.confidence,
+            autoExecuted: true,
+            confirmedByUser: false,
+          }
         );
         actions.push({
           action: tc.name,
@@ -135,14 +165,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Return parsed intent without executing (confirmation required or
-    // low confidence or no tool calls)
+    // low confidence or no tool calls or auto-execute disabled)
     return NextResponse.json({
       intent: result.intent,
       confidence: result.confidence,
       response: result.explanation,
       fields: result.fields,
       area: result.area,
-      confirmationRequired: result.confirmationRequired,
+      confirmationRequired: hasToolCalls && !isReadOnly ? true : false,
       toolCalls: result.toolCalls,
       actions: [],
     });

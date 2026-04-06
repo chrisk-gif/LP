@@ -15,11 +15,15 @@ export interface ExecutionResult {
 
 interface AuditEntry {
   user_id: string;
-  action: string;
+  agent_name: string;
+  action_type: string;
   entity_type: string | null;
   entity_id: string | null;
   input_data: Record<string, unknown>;
   output_data: Record<string, unknown> | null;
+  confidence: number | null;
+  auto_executed: boolean;
+  confirmed_by_user: boolean;
   success: boolean;
 }
 
@@ -44,10 +48,20 @@ async function logAudit(
   entry: AuditEntry
 ): Promise<void> {
   try {
-    await supabase.from("ai_action_audit").insert(entry);
-  } catch (err) {
+    await supabase.from("ai_action_audit").insert({
+      user_id: entry.user_id,
+      agent_name: entry.agent_name,
+      action_type: entry.action_type,
+      entity_type: entry.entity_type,
+      entity_id: entry.entity_id,
+      input_data: entry.input_data,
+      output_data: entry.output_data,
+      confidence: entry.confidence,
+      auto_executed: entry.auto_executed,
+      confirmed_by_user: entry.confirmed_by_user,
+    });
+  } catch {
     // Audit logging must never break the main flow
-    console.error("Failed to log AI action audit:", err);
   }
 }
 
@@ -226,15 +240,12 @@ async function executeLogWorkout(
   const title = input.title as string | undefined;
   if (!title) return fail("Mangler tittel for trenings\u00f8kten.");
 
-  // Resolve trening area
-  const areaId = await resolveAreaId(supabase, "trening");
-
   const { data, error } = await supabase
     .from("workout_sessions")
     .insert({
       user_id: userId,
       title,
-      area_id: areaId,
+      session_type: (input.session_type as string) ?? null,
       duration_minutes: (input.duration_minutes as number) ?? null,
       intensity: (input.intensity as string) ?? null,
       notes: (input.notes as string) ?? null,
@@ -548,10 +559,17 @@ const TOOL_EXECUTORS: Record<
   reschedule: (s, i) => executeReschedule(s, i),
 };
 
+export interface ExecuteOptions {
+  confidence?: number;
+  autoExecuted?: boolean;
+  confirmedByUser?: boolean;
+}
+
 export async function executeToolCall(
   toolName: string,
   input: Record<string, unknown>,
-  userId: string
+  userId: string,
+  options?: ExecuteOptions
 ): Promise<ExecutionResult> {
   const supabase = await createServerSupabaseClient();
 
@@ -572,11 +590,15 @@ export async function executeToolCall(
   // Audit log
   await logAudit(supabase, {
     user_id: userId,
-    action: toolName,
+    agent_name: "command-router",
+    action_type: toolName,
     entity_type: result.entityType ?? null,
     entity_id: result.entityId ?? null,
     input_data: input,
     output_data: result.data ?? null,
+    confidence: options?.confidence ?? null,
+    auto_executed: options?.autoExecuted ?? false,
+    confirmed_by_user: options?.confirmedByUser ?? false,
     success: result.success,
   });
 

@@ -60,12 +60,13 @@ interface Area {
 interface QuickAddProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  defaultType?: string;
 }
 
 type SubmitStatus = "idle" | "submitting" | "success" | "error";
 
-export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
-  const [type, setType] = useState<string>("task");
+export function QuickAdd({ open, onOpenChange, defaultType }: QuickAddProps) {
+  const [type, setType] = useState<string>(defaultType ?? "task");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [areaId, setAreaId] = useState<string>("");
@@ -77,6 +78,13 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
   const [errorMessage, setErrorMessage] = useState("");
 
   const supabase = createClient();
+
+  // Update type when defaultType changes while dialog is open
+  useEffect(() => {
+    if (open && defaultType) {
+      setType(defaultType);
+    }
+  }, [open, defaultType]);
 
   // Fetch areas when dialog opens
   useEffect(() => {
@@ -90,8 +98,8 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
           .order("name");
         if (error) throw error;
         setAreas(data ?? []);
-      } catch (err) {
-        console.error("Failed to fetch areas:", err);
+      } catch {
+        // areas will remain empty, area selector will show nothing
       } finally {
         setAreasLoading(false);
       }
@@ -100,7 +108,7 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
   }, [open]);
 
   function resetForm() {
-    setType("task");
+    setType(defaultType ?? "task");
     setTitle("");
     setDescription("");
     setAreaId("");
@@ -116,7 +124,7 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
     // Validate area is selected for types that require it
     if (["task", "event"].includes(type) && !areaId) {
       setStatus("error");
-      setErrorMessage("Velg et omrade for denne typen.");
+      setErrorMessage("Velg et område for denne typen.");
       return;
     }
 
@@ -147,7 +155,6 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
         }
 
         case "event": {
-          // Build start_time from dueDate, default to 09:00 today if no date selected
           const eventDate = dueDate ?? new Date();
           const startTime = new Date(eventDate);
           startTime.setHours(9, 0, 0, 0);
@@ -173,12 +180,19 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
         }
 
         case "note": {
-          const { error } = await supabase.from("notes").insert({
-            title: trimmedTitle,
-            content: trimmedDesc ?? null,
-            area_id: areaId || null,
+          const res = await fetch("/api/notes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: trimmedTitle,
+              content: trimmedDesc ?? null,
+              area_id: areaId || null,
+            }),
           });
-          if (error) throw new Error(error.message);
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || "Kunne ikke opprette notat");
+          }
           break;
         }
 
@@ -201,23 +215,35 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
         }
 
         case "workout": {
-          const { error } = await supabase.from("workout_sessions").insert({
-            title: trimmedTitle,
-            notes: trimmedDesc ?? null,
-            session_date: dueDate
-              ? format(dueDate, "yyyy-MM-dd")
-              : format(new Date(), "yyyy-MM-dd"),
+          const res = await fetch("/api/workouts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: trimmedTitle,
+              notes: trimmedDesc ?? null,
+              completed_at: new Date().toISOString(),
+            }),
           });
-          if (error) throw new Error(error.message);
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || "Kunne ikke logge trening");
+          }
           break;
         }
 
         case "inbox": {
-          const { error } = await supabase.from("inbox_items").insert({
-            title: trimmedTitle,
-            raw_text: trimmedDesc ?? null,
+          const res = await fetch("/api/inbox", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: trimmedTitle,
+              raw_transcript: trimmedDesc ?? null,
+            }),
           });
-          if (error) throw new Error(error.message);
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || "Kunne ikke legge til i innboks");
+          }
           break;
         }
 
@@ -283,10 +309,16 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
 
           {/* Title */}
           <div className="space-y-2">
-            <Label htmlFor="quick-add-title">Tittel</Label>
+            <Label htmlFor="quick-add-title">
+              {type === "inbox" ? "Innhold" : "Tittel"}
+            </Label>
             <Input
               id="quick-add-title"
-              placeholder={`Ny ${selectedType?.label.toLowerCase() ?? "oppgave"}...`}
+              placeholder={
+                type === "inbox"
+                  ? "Skriv noe å huske..."
+                  : `Ny ${selectedType?.label.toLowerCase() ?? "oppgave"}...`
+              }
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               autoFocus
@@ -296,7 +328,9 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
           {/* Description (only for task/note/inbox) */}
           {["task", "note", "inbox"].includes(type) && (
             <div className="space-y-2">
-              <Label htmlFor="quick-add-desc">Beskrivelse (valgfritt)</Label>
+              <Label htmlFor="quick-add-desc">
+                {type === "inbox" ? "Detaljer (valgfritt)" : "Beskrivelse (valgfritt)"}
+              </Label>
               <Textarea
                 id="quick-add-desc"
                 placeholder="Legg til detaljer..."
@@ -308,24 +342,26 @@ export function QuickAdd({ open, onOpenChange }: QuickAddProps) {
           )}
 
           {/* Area selector */}
-          <div className="space-y-2">
-            <Label>
-              Omrade
-              {requiresArea && <span className="text-destructive ml-0.5">*</span>}
-            </Label>
-            <Select value={areaId} onValueChange={setAreaId}>
-              <SelectTrigger>
-                <SelectValue placeholder={areasLoading ? "Laster..." : "Velg omrade..."} />
-              </SelectTrigger>
-              <SelectContent>
-                {areas.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {type !== "inbox" && (
+            <div className="space-y-2">
+              <Label>
+                Område
+                {requiresArea && <span className="text-destructive ml-0.5">*</span>}
+              </Label>
+              <Select value={areaId} onValueChange={setAreaId}>
+                <SelectTrigger>
+                  <SelectValue placeholder={areasLoading ? "Laster..." : "Velg område..."} />
+                </SelectTrigger>
+                <SelectContent>
+                  {areas.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Due date */}
           {["task", "event", "bill"].includes(type) && (

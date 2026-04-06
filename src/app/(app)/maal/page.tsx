@@ -6,6 +6,23 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Target, Plus, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -41,6 +58,8 @@ export default function GoalsPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [areas, setAreas] = useState<Area[]>([]);
 
   useEffect(() => {
     async function fetchData() {
@@ -58,6 +77,14 @@ export default function GoalsPage() {
       }
 
       setGoals((data as unknown as Goal[]) ?? []);
+
+      // Also fetch areas for the create dialog
+      const { data: areasData } = await supabase
+        .from("areas")
+        .select("id, name, color, slug")
+        .order("name");
+      setAreas((areasData as Area[]) ?? []);
+
       setLoading(false);
     }
 
@@ -100,7 +127,7 @@ export default function GoalsPage() {
           </h1>
           <p className="text-muted-foreground">Dine mål og ambisjoner</p>
         </div>
-        <Button>
+        <Button onClick={() => setCreateOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Nytt mål
         </Button>
@@ -189,7 +216,182 @@ export default function GoalsPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      <CreateGoalDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        areas={areas}
+        onCreated={(goal) => {
+          setGoals((prev) => [...prev, goal]);
+          setCreateOpen(false);
+        }}
+      />
     </div>
+  );
+}
+
+function CreateGoalDialog({
+  open,
+  onOpenChange,
+  areas,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  areas: Area[];
+  onCreated: (goal: Goal) => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [horizon, setHorizon] = useState("quarterly");
+  const [areaId, setAreaId] = useState("");
+  const [targetDate, setTargetDate] = useState("");
+  const [whyItMatters, setWhyItMatters] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      setFormError("Tittel er påkrevd");
+      return;
+    }
+    if (!areaId) {
+      setFormError("Velg et område");
+      return;
+    }
+
+    setSubmitting(true);
+    setFormError(null);
+
+    try {
+      const res = await fetch("/api/goals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim() || null,
+          horizon,
+          area_id: areaId,
+          target_date: targetDate || null,
+          why_it_matters: whyItMatters.trim() || null,
+          status: "active",
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Kunne ikke opprette mål");
+      }
+
+      const data = await res.json();
+      // Attach area info for UI display
+      const area = areas.find((a) => a.id === areaId);
+      const goalWithArea = { ...data, areas: area ?? { id: areaId, name: "Ukjent", color: "#6b7280", slug: "" } };
+      onCreated(goalWithArea);
+      setTitle("");
+      setDescription("");
+      setHorizon("quarterly");
+      setAreaId("");
+      setTargetDate("");
+      setWhyItMatters("");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Noe gikk galt");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Nytt mål</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="goal-title">Tittel</Label>
+            <Input
+              id="goal-title"
+              placeholder="F.eks. Løpe halvmaraton"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="goal-desc">Beskrivelse (valgfritt)</Label>
+            <Textarea
+              id="goal-desc"
+              placeholder="Beskriv målet..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Horisont</Label>
+              <Select value={horizon} onValueChange={setHorizon}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="short-term">Kortsiktig</SelectItem>
+                  <SelectItem value="monthly">Månedlig</SelectItem>
+                  <SelectItem value="quarterly">Kvartalsvis</SelectItem>
+                  <SelectItem value="yearly">Årlig</SelectItem>
+                  <SelectItem value="long-term">Langsiktig</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Område</Label>
+              <Select value={areaId} onValueChange={setAreaId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Velg område..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {areas.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="goal-target-date">Måldato</Label>
+            <Input
+              id="goal-target-date"
+              type="date"
+              value={targetDate}
+              onChange={(e) => setTargetDate(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="goal-why">Hvorfor er dette viktig?</Label>
+            <Textarea
+              id="goal-why"
+              placeholder="Motivasjonen bak målet..."
+              value={whyItMatters}
+              onChange={(e) => setWhyItMatters(e.target.value)}
+              rows={2}
+            />
+          </div>
+
+          {formError && (
+            <p className="text-sm text-destructive">{formError}</p>
+          )}
+
+          <DialogFooter>
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Opprett mål
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

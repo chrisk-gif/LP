@@ -5,15 +5,34 @@ import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
-import { BookOpen, Plus, Star, AlertTriangle, Lightbulb, ArrowRight, FileText, Loader2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import {
+  BookOpen,
+  Plus,
+  Star,
+  AlertTriangle,
+  Lightbulb,
+  ArrowRight,
+  FileText,
+  Loader2,
+} from "lucide-react";
 
 interface Review {
   id: string;
@@ -51,27 +70,31 @@ export default function ReviewsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewNote, setViewNote] = useState<NoteItem | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
-      const supabase = createClient();
+      try {
+        const [reviewsRes, notesRes] = await Promise.all([
+          fetch("/api/reviews"),
+          fetch("/api/notes"),
+        ]);
 
-      const [reviewsRes, notesRes] = await Promise.all([
-        supabase.from("reviews").select("*").order("period_start", { ascending: false }),
-        supabase.from("notes").select("*").order("created_at", { ascending: false }).limit(50),
-      ]);
+        if (!reviewsRes.ok) throw new Error("Kunne ikke hente gjennomganger");
 
-      if (reviewsRes.error) {
-        setError("Kunne ikke hente gjennomganger: " + reviewsRes.error.message);
+        const reviewsData = await reviewsRes.json();
+        setReviews(reviewsData ?? []);
+
+        if (notesRes.ok) {
+          const notesData = await notesRes.json();
+          setNotes((notesData as NoteItem[]) ?? []);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Kunne ikke laste data");
+      } finally {
         setLoading(false);
-        return;
       }
-
-      setReviews(reviewsRes.data ?? []);
-      setNotes((notesRes.data as NoteItem[]) ?? []);
-      setLoading(false);
     }
-
     fetchData();
   }, []);
 
@@ -97,11 +120,13 @@ export default function ReviewsPage() {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <BookOpen className="h-6 w-6" />
-            Logg & Refleksjon
+            Logg og refleksjon
           </h1>
-          <p className="text-muted-foreground">Daglige, ukentlige og månedlige gjennomganger</p>
+          <p className="text-muted-foreground">
+            Daglige, ukentlige og månedlige gjennomganger
+          </p>
         </div>
-        <Button>
+        <Button onClick={() => setCreateOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Ny gjennomgang
         </Button>
@@ -118,7 +143,9 @@ export default function ReviewsPage() {
 
         <TabsContent value="all" className="space-y-4 mt-4">
           {reviews.length === 0 ? (
-            <p className="text-muted-foreground">Ingen gjennomganger ennå. Opprett din første for å komme i gang.</p>
+            <p className="text-muted-foreground">
+              Ingen gjennomganger ennå. Opprett din første for å komme i gang.
+            </p>
           ) : (
             reviews.map((review) => (
               <ReviewCard key={review.id} review={review} />
@@ -141,6 +168,7 @@ export default function ReviewsPage() {
             )}
           </TabsContent>
         ))}
+
         <TabsContent value="notes" className="space-y-4 mt-4">
           {notes.length === 0 ? (
             <p className="text-muted-foreground">Ingen notater ennå.</p>
@@ -164,7 +192,9 @@ export default function ReviewsPage() {
                 </CardHeader>
                 {note.content && (
                   <CardContent>
-                    <p className="text-sm text-muted-foreground line-clamp-2">{note.content}</p>
+                    <p className="text-sm text-muted-foreground line-clamp-2">
+                      {note.content}
+                    </p>
                   </CardContent>
                 )}
               </Card>
@@ -173,10 +203,17 @@ export default function ReviewsPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Note detail dialog */}
+      <CreateReviewDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(review) => {
+          setReviews((prev) => [review, ...prev]);
+          setCreateOpen(false);
+        }}
+      />
+
       <NoteDetailDialog note={viewNote} onClose={() => setViewNote(null)} />
 
-      {/* Deep-link: ?noteId=<uuid> opens note detail */}
       <Suspense fallback={null}>
         <NoteDeepLinker notes={notes} onOpenNote={setViewNote} />
       </Suspense>
@@ -184,9 +221,201 @@ export default function ReviewsPage() {
   );
 }
 
+// ==========================================================================
+// Create review dialog
+// ==========================================================================
+
+function CreateReviewDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: (review: Review) => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [period, setPeriod] = useState("weekly");
+  const [periodStart, setPeriodStart] = useState("");
+  const [periodEnd, setPeriodEnd] = useState("");
+  const [wins, setWins] = useState("");
+  const [blockers, setBlockers] = useState("");
+  const [lessonsLearned, setLessonsLearned] = useState("");
+  const [nextFocus, setNextFocus] = useState("");
+
+  // Set default dates when dialog opens
+  useEffect(() => {
+    if (!open) return;
+    const now = new Date();
+    const end = now.toISOString().split("T")[0];
+    const start = new Date(now);
+    if (period === "daily") {
+      // same day
+    } else if (period === "weekly") {
+      start.setDate(start.getDate() - 6);
+    } else if (period === "monthly") {
+      start.setMonth(start.getMonth() - 1);
+      start.setDate(start.getDate() + 1);
+    } else if (period === "quarterly") {
+      start.setMonth(start.getMonth() - 3);
+      start.setDate(start.getDate() + 1);
+    }
+    setPeriodStart(start.toISOString().split("T")[0]);
+    setPeriodEnd(end);
+  }, [open, period]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!periodStart || !periodEnd) {
+      setFormError("Start- og sluttdato er påkrevd");
+      return;
+    }
+
+    setSubmitting(true);
+    setFormError(null);
+
+    try {
+      const res = await fetch("/api/reviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          period,
+          period_start: periodStart,
+          period_end: periodEnd,
+          wins: wins.trim() || null,
+          blockers: blockers.trim() || null,
+          lessons_learned: lessonsLearned.trim() || null,
+          next_focus: nextFocus.trim() || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Kunne ikke opprette gjennomgang");
+      }
+
+      const data = await res.json();
+      onCreated(data);
+      setWins("");
+      setBlockers("");
+      setLessonsLearned("");
+      setNextFocus("");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Kunne ikke opprette gjennomgang");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Ny gjennomgang</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <Select value={period} onValueChange={setPeriod}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">Daglig</SelectItem>
+                  <SelectItem value="weekly">Ukentlig</SelectItem>
+                  <SelectItem value="monthly">Månedlig</SelectItem>
+                  <SelectItem value="quarterly">Kvartalsvis</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="review-start">Fra</Label>
+              <Input
+                id="review-start"
+                type="date"
+                value={periodStart}
+                onChange={(e) => setPeriodStart(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="review-end">Til</Label>
+              <Input
+                id="review-end"
+                type="date"
+                value={periodEnd}
+                onChange={(e) => setPeriodEnd(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="review-wins">Seiere</Label>
+            <Textarea
+              id="review-wins"
+              placeholder="Hva gikk bra i denne perioden?"
+              value={wins}
+              onChange={(e) => setWins(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="review-blockers">Utfordringer</Label>
+            <Textarea
+              id="review-blockers"
+              placeholder="Hva var vanskelig eller blokkerte deg?"
+              value={blockers}
+              onChange={(e) => setBlockers(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="review-lessons">Lærdommer</Label>
+            <Textarea
+              id="review-lessons"
+              placeholder="Hva lærte du?"
+              value={lessonsLearned}
+              onChange={(e) => setLessonsLearned(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="review-focus">Fokus videre</Label>
+            <Textarea
+              id="review-focus"
+              placeholder="Hva vil du fokusere på neste periode?"
+              value={nextFocus}
+              onChange={(e) => setNextFocus(e.target.value)}
+              rows={2}
+            />
+          </div>
+
+          {formError && (
+            <p className="text-sm text-destructive">{formError}</p>
+          )}
+
+          <DialogFooter>
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Opprett
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ==========================================================================
+// Review card
+// ==========================================================================
+
 function ReviewCard({ review }: { review: Review }) {
   return (
-    <Card className="cursor-pointer hover:shadow-md transition-shadow">
+    <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg">
@@ -293,7 +522,9 @@ function NoteDetailDialog({
             <p className="text-sm whitespace-pre-wrap">{note.content}</p>
           )}
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>Opprettet: {new Date(note.created_at).toLocaleDateString("nb-NO")}</span>
+            <span>
+              Opprettet: {new Date(note.created_at).toLocaleDateString("nb-NO")}
+            </span>
             {note.pinned && <Badge variant="outline">Festet</Badge>}
           </div>
           {note.tags.length > 0 && (

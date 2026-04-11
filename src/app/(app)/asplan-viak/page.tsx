@@ -31,7 +31,6 @@ import {
   Plus,
   Loader2,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 
 interface Tender {
   id: string;
@@ -78,58 +77,40 @@ export default function AsplanViakPage() {
 
   useEffect(() => {
     async function fetchData() {
-      const supabase = createClient();
+      try {
+        const areasRes = await fetch("/api/areas");
+        if (!areasRes.ok) throw new Error("Kunne ikke hente områder");
+        const allAreas = await areasRes.json();
+        const avArea = allAreas.find((a: { slug: string }) => a.slug === "asplan-viak");
 
-      const { data: areas, error: areaError } = await supabase
-        .from("areas")
-        .select("id, slug")
-        .eq("slug", "asplan-viak");
+        if (!avArea) {
+          setTenders([]);
+          setTasks([]);
+          setLoading(false);
+          return;
+        }
 
-      if (areaError) {
-        setError("Kunne ikke hente område: " + areaError.message);
+        const aid = avArea.id;
+        setAreaId(aid);
+
+        const [tendersRes, tasksRes] = await Promise.all([
+          fetch(`/api/tenders?area_id=${aid}`),
+          fetch(`/api/tasks?area_id=${aid}`),
+        ]);
+
+        if (!tendersRes.ok) throw new Error("Kunne ikke hente tilbud");
+        if (!tasksRes.ok) throw new Error("Kunne ikke hente oppgaver");
+
+        const tendersData = await tendersRes.json();
+        const tasksData = await tasksRes.json();
+
+        setTenders(tendersData ?? []);
+        setTasks(tasksData ?? []);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Kunne ikke laste data");
+      } finally {
         setLoading(false);
-        return;
       }
-
-      if (!areas || areas.length === 0) {
-        setTenders([]);
-        setTasks([]);
-        setLoading(false);
-        return;
-      }
-
-      const aid = areas[0].id;
-      setAreaId(aid);
-
-      const [tendersResult, tasksResult] = await Promise.all([
-        supabase
-          .from("tenders")
-          .select("*")
-          .eq("area_id", aid)
-          .order("due_date"),
-        supabase
-          .from("tasks")
-          .select("*")
-          .eq("area_id", aid)
-          .in("status", ["inbox", "todo", "in_progress", "waiting"])
-          .order("due_date"),
-      ]);
-
-      if (tendersResult.error) {
-        setError("Kunne ikke hente tilbud: " + tendersResult.error.message);
-        setLoading(false);
-        return;
-      }
-
-      if (tasksResult.error) {
-        setError("Kunne ikke hente oppgaver: " + tasksResult.error.message);
-        setLoading(false);
-        return;
-      }
-
-      setTenders(tendersResult.data ?? []);
-      setTasks(tasksResult.data ?? []);
-      setLoading(false);
     }
 
     fetchData();

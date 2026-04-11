@@ -218,7 +218,7 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between">
             <div>
               <Label>Tema</Label>
-              <p className="text-sm text-muted-foreground">Velg lyst eller morkt tema</p>
+              <p className="text-sm text-muted-foreground">Velg lyst eller mørkt tema</p>
             </div>
             <div className="flex gap-2">
               <Button
@@ -233,7 +233,7 @@ export default function SettingsPage() {
                 size="sm"
                 onClick={() => handleThemeChange("dark")}
               >
-                <Moon className="h-4 w-4 mr-1" /> Morkt
+                <Moon className="h-4 w-4 mr-1" /> Mørkt
               </Button>
               <Button
                 variant={theme === "system" ? "default" : "outline"}
@@ -252,13 +252,13 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Globe className="h-5 w-5" />
-            Sprak og region
+            Språk og region
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-2">
-            <Label>Sprak</Label>
-            <Input value="Norsk (Bokmal)" disabled />
+            <Label>Språk</Label>
+            <Input value="Norsk (bokmål)" disabled />
           </div>
           <div className="grid gap-2">
             <Label>Tidssone</Label>
@@ -282,9 +282,9 @@ export default function SettingsPage() {
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <Label>Auto-utfor trygge kommandoer</Label>
+              <Label>Auto-utfør trygge kommandoer</Label>
               <p className="text-sm text-muted-foreground">
-                La AI-en automatisk utfore handlinger med hoy sikkerhet
+                La AI-en automatisk utføre handlinger med høy sikkerhet
               </p>
             </div>
             <Button
@@ -292,20 +292,18 @@ export default function SettingsPage() {
               size="sm"
               onClick={handleAiAutoExecuteToggle}
             >
-              {aiAutoExecute ? "Pa" : "Av"}
+              {aiAutoExecute ? "På" : "Av"}
             </Button>
           </div>
           <Separator />
           <div className="flex items-center justify-between">
             <div>
-              <Label>Morgenoppsummering</Label>
+              <Label className="text-muted-foreground">Morgenoppsummering</Label>
               <p className="text-sm text-muted-foreground">
-                Generer en kort oppsummering hver morgen
+                Automatisk morgenoppsummering er ikke tilgjengelig ennå.
               </p>
             </div>
-            <Button variant="outline" size="sm" disabled>
-              Kommer snart
-            </Button>
+            <Badge variant="outline" className="text-xs text-muted-foreground">Ikke tilgjengelig</Badge>
           </div>
         </CardContent>
       </Card>
@@ -323,7 +321,7 @@ export default function SettingsPage() {
             <div>
               <Label>Talte svar</Label>
               <p className="text-sm text-muted-foreground">
-                Les opp AI-svar med nettleserens talesyntese nar stemmekommandoer brukes
+                Les opp AI-svar med nettleserens talesyntese når stemmekommandoer brukes
               </p>
             </div>
             <Button
@@ -331,14 +329,14 @@ export default function SettingsPage() {
               size="sm"
               onClick={handleVoiceTtsToggle}
             >
-              {voiceTtsEnabled ? "Pa" : "Av"}
+              {voiceTtsEnabled ? "På" : "Av"}
             </Button>
           </div>
           <div className="flex items-center justify-between">
             <div>
               <Label>Stemmegjenkjenning</Label>
               <p className="text-sm text-muted-foreground">
-                Bruker nettleserens innebygde talegjenkjenning (Chrome, Edge). Ingen serversidegjenkjenning konfigurert.
+                Bruker nettleserens innebygde talegjenkjenning (Chrome, Edge).
               </p>
             </div>
             <Badge variant="outline" className="text-xs">Nettleser</Badge>
@@ -357,14 +355,12 @@ export default function SettingsPage() {
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <Label>Nettleservarsler</Label>
+              <Label className="text-muted-foreground">Nettleservarsler</Label>
               <p className="text-sm text-muted-foreground">
-                Motta varsler om frister og paminnelser
+                Push-varsler for frister og påminnelser er ikke tilgjengelig ennå.
               </p>
             </div>
-            <Button variant="outline" size="sm" disabled>
-              Kommer snart
-            </Button>
+            <Badge variant="outline" className="text-xs text-muted-foreground">Ikke tilgjengelig</Badge>
           </div>
         </CardContent>
       </Card>

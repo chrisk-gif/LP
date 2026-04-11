@@ -633,16 +633,12 @@ function CreateEventDialog({
 
   useEffect(() => {
     if (!open) return;
-    // Fetch areas for the selector
     async function loadAreas() {
       try {
-        const res = await fetch("/api/events?_areas_only=1");
-        // We don't have a dedicated areas endpoint; fetch from supabase client
-        const { createClient } = await import("@/lib/supabase/client");
-        const supabase = createClient();
-        const { data } = await supabase.from("areas").select("id, name, slug").order("name");
+        const res = await fetch("/api/areas");
+        if (!res.ok) return;
+        const data = await res.json();
         if (data) setAreas(data);
-        // Auto-select privat if available
         if (data && data.length > 0 && !areaId) {
           const privat = data.find((a: AreaOption) => a.slug === "privat");
           setAreaId(privat?.id ?? data[0].id);

@@ -5,16 +5,26 @@ import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { FolderKanban, Plus, Loader2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 
 interface Area {
   id: string;
@@ -54,26 +64,21 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewProject, setViewProject] = useState<Project | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
-      const supabase = createClient();
-
-      const { data, error: fetchError } = await supabase
-        .from("projects")
-        .select("*, areas(id, name, color, slug)")
-        .order("updated_at", { ascending: false });
-
-      if (fetchError) {
-        setError("Kunne ikke hente prosjekter: " + fetchError.message);
+      try {
+        const res = await fetch("/api/projects");
+        if (!res.ok) throw new Error("Kunne ikke hente prosjekter");
+        const data = await res.json();
+        setProjects(data ?? []);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Kunne ikke hente prosjekter");
+      } finally {
         setLoading(false);
-        return;
       }
-
-      setProjects((data as unknown as Project[]) ?? []);
-      setLoading(false);
     }
-
     fetchData();
   }, []);
 
@@ -105,7 +110,7 @@ export default function ProjectsPage() {
             Dine prosjekter og initiativer
           </p>
         </div>
-        <Button>
+        <Button onClick={() => setCreateOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Nytt prosjekt
         </Button>
@@ -137,25 +142,7 @@ export default function ProjectsPage() {
             projects
               .filter((p) => p.status === "backlog")
               .map((project) => (
-                <Card key={project.id}>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-lg">{project.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-muted-foreground">
-                      {project.description ?? "Ingen beskrivelse"}
-                    </p>
-                    {project.areas && (
-                      <div className="flex items-center gap-1 mt-2">
-                        <div
-                          className="w-3 h-3 rounded-full"
-                          style={{ backgroundColor: project.areas.color ?? "#6b7280" }}
-                        />
-                        <span className="text-sm text-muted-foreground">{project.areas.name}</span>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                <ProjectCard key={project.id} project={project} onClick={setViewProject} />
               ))
           )}
         </TabsContent>
@@ -173,16 +160,213 @@ export default function ProjectsPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Project detail dialog */}
+      <CreateProjectDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(project) => {
+          setProjects((prev) => [project, ...prev]);
+          setCreateOpen(false);
+        }}
+      />
+
       <ProjectDetailDialog project={viewProject} onClose={() => setViewProject(null)} />
 
-      {/* Deep-link: ?projectId=<uuid> opens project detail */}
       <Suspense fallback={null}>
         <ProjectDeepLinker projects={projects} onOpenProject={setViewProject} />
       </Suspense>
     </div>
   );
 }
+
+// ==========================================================================
+// Create project dialog
+// ==========================================================================
+
+function CreateProjectDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: (project: Project) => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState("medium");
+  const [status, setStatus] = useState("active");
+  const [dueDate, setDueDate] = useState("");
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [areaId, setAreaId] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    async function loadAreas() {
+      try {
+        const res = await fetch("/api/areas");
+        if (res.ok) {
+          const data = await res.json();
+          setAreas(data);
+          if (data.length > 0 && !areaId) {
+            const privat = data.find((a: Area) => a.slug === "privat");
+            setAreaId(privat?.id ?? data[0].id);
+          }
+        }
+      } catch {
+        // areas remain empty
+      }
+    }
+    loadAreas();
+  }, [open]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      setFormError("Tittel er påkrevd");
+      return;
+    }
+    if (!areaId) {
+      setFormError("Velg et område");
+      return;
+    }
+
+    setSubmitting(true);
+    setFormError(null);
+
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim() || null,
+          area_id: areaId,
+          status,
+          priority,
+          due_date: dueDate || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Kunne ikke opprette prosjekt");
+      }
+
+      const data = await res.json();
+      onCreated(data);
+      setTitle("");
+      setDescription("");
+      setPriority("medium");
+      setStatus("active");
+      setDueDate("");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Kunne ikke opprette prosjekt");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Nytt prosjekt</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="project-title">Tittel</Label>
+            <Input
+              id="project-title"
+              placeholder="F.eks. Redesign av nettside"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="project-desc">Beskrivelse (valgfritt)</Label>
+            <Textarea
+              id="project-desc"
+              placeholder="Beskriv prosjektet..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Område <span className="text-destructive">*</span></Label>
+              <Select value={areaId} onValueChange={setAreaId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Velg område..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {areas.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Prioritet</Label>
+              <Select value={priority} onValueChange={setPriority}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="critical">Kritisk</SelectItem>
+                  <SelectItem value="high">Høy</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="low">Lav</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select value={status} onValueChange={setStatus}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Aktiv</SelectItem>
+                  <SelectItem value="backlog">Backlog</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="project-due">Frist (valgfritt)</Label>
+              <Input
+                id="project-due"
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {formError && (
+            <p className="text-sm text-destructive">{formError}</p>
+          )}
+
+          <DialogFooter>
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Opprett
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ==========================================================================
+// Project card
+// ==========================================================================
 
 function ProjectCard({ project, onClick }: { project: Project; onClick?: (p: Project) => void }) {
   return (

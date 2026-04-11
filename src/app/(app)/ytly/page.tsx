@@ -17,7 +17,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Rocket, Plus, TrendingUp, Loader2, Target } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 
 interface Project {
   id: string;
@@ -59,67 +58,45 @@ export default function YtlyPage() {
 
   useEffect(() => {
     async function fetchData() {
-      const supabase = createClient();
+      try {
+        // Resolve area ID via canonical areas route
+        const areasRes = await fetch("/api/areas");
+        if (!areasRes.ok) throw new Error("Kunne ikke hente områder");
+        const allAreas = await areasRes.json();
+        const ytlyArea = allAreas.find((a: { slug: string }) => a.slug === "ytly");
 
-      const { data: areas, error: areaError } = await supabase
-        .from("areas")
-        .select("id, slug")
-        .eq("slug", "ytly");
+        if (!ytlyArea) {
+          setLoading(false);
+          return;
+        }
 
-      if (areaError) {
-        setError("Kunne ikke hente område: " + areaError.message);
+        const aid = ytlyArea.id;
+        setAreaId(aid);
+
+        const [projectsRes, tasksRes, goalsRes] = await Promise.all([
+          fetch(`/api/projects?area_id=${aid}`),
+          fetch(`/api/tasks?area_id=${aid}`),
+          fetch(`/api/goals?area_id=${aid}`),
+        ]);
+
+        if (!projectsRes.ok) throw new Error("Kunne ikke hente prosjekter");
+        if (!tasksRes.ok) throw new Error("Kunne ikke hente oppgaver");
+        if (!goalsRes.ok) throw new Error("Kunne ikke hente mål");
+
+        const [projectsData, tasksData, goalsData] = await Promise.all([
+          projectsRes.json(),
+          tasksRes.json(),
+          goalsRes.json(),
+        ]);
+
+        setProjects(projectsData ?? []);
+        setTasks(tasksData ?? []);
+        setGoals(goalsData ?? []);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Kunne ikke laste data");
+      } finally {
         setLoading(false);
-        return;
       }
-
-      if (!areas || areas.length === 0) {
-        setLoading(false);
-        return;
-      }
-
-      const areaId = areas[0].id;
-      setAreaId(areaId);
-
-      const [projectsResult, tasksResult, goalsResult] = await Promise.all([
-        supabase
-          .from("projects")
-          .select("*")
-          .eq("area_id", areaId)
-          .order("updated_at", { ascending: false }),
-        supabase
-          .from("tasks")
-          .select("*")
-          .eq("area_id", areaId)
-          .in("status", ["inbox", "todo", "in_progress", "waiting"])
-          .order("due_date"),
-        supabase
-          .from("goals")
-          .select("*")
-          .eq("area_id", areaId)
-          .eq("status", "active")
-          .order("target_date"),
-      ]);
-
-      if (projectsResult.error) {
-        setError("Kunne ikke hente prosjekter: " + projectsResult.error.message);
-        setLoading(false);
-        return;
-      }
-      if (tasksResult.error) {
-        setError("Kunne ikke hente oppgaver: " + tasksResult.error.message);
-        setLoading(false);
-        return;
-      }
-      if (goalsResult.error) {
-        setError("Kunne ikke hente mål: " + goalsResult.error.message);
-        setLoading(false);
-        return;
-      }
-
-      setProjects(projectsResult.data ?? []);
-      setTasks(tasksResult.data ?? []);
-      setGoals(goalsResult.data ?? []);
-      setLoading(false);
     }
 
     fetchData();

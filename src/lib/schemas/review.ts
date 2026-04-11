@@ -1,5 +1,9 @@
 // =============================================================================
 // Livsplanlegg – Review Zod Schemas
+// Aligned with SQL: reviews(id, user_id, period, period_start, period_end,
+//   wins, blockers, lessons_learned, next_focus, freeform_notes,
+//   metrics_snapshot, ai_generated)
+// Period enum: daily, weekly, monthly, quarterly
 // =============================================================================
 
 import { z } from 'zod';
@@ -26,17 +30,14 @@ export const createReviewSchema = z
     period_start: z.string().date(),
     period_end: z.string().date(),
     wins: z.string().max(10000).nullable().optional(),
-    challenges: z.string().max(10000).nullable().optional(),
-    lessons: z.string().max(10000).nullable().optional(),
-    next_period_focus: z.string().max(10000).nullable().optional(),
-    energy_rating: z.number().int().min(1).max(10).nullable().optional(),
-    productivity_rating: z.number().int().min(1).max(10).nullable().optional(),
-    satisfaction_rating: z.number().int().min(1).max(10).nullable().optional(),
-    is_completed: z.boolean().optional().default(false),
+    blockers: z.string().max(10000).nullable().optional(),
+    lessons_learned: z.string().max(10000).nullable().optional(),
+    next_focus: z.string().max(10000).nullable().optional(),
+    freeform_notes: z.string().max(10000).nullable().optional(),
   })
   .refine(
     (data) => new Date(data.period_end) >= new Date(data.period_start),
-    { message: 'Period end must be after period start', path: ['period_end'] },
+    { message: 'Sluttdato må være etter startdato', path: ['period_end'] },
   );
 
 export type CreateReviewInput = z.infer<typeof createReviewSchema>;
@@ -46,19 +47,14 @@ export type CreateReviewInput = z.infer<typeof createReviewSchema>;
 // ---------------------------------------------------------------------------
 
 export const updateReviewSchema = z.object({
-  id: z.string().uuid(),
   period: reviewPeriodSchema.optional(),
   period_start: z.string().date().optional(),
   period_end: z.string().date().optional(),
   wins: z.string().max(10000).nullable().optional(),
-  challenges: z.string().max(10000).nullable().optional(),
-  lessons: z.string().max(10000).nullable().optional(),
-  next_period_focus: z.string().max(10000).nullable().optional(),
-  energy_rating: z.number().int().min(1).max(10).nullable().optional(),
-  productivity_rating: z.number().int().min(1).max(10).nullable().optional(),
-  satisfaction_rating: z.number().int().min(1).max(10).nullable().optional(),
-  is_completed: z.boolean().optional(),
-  completed_at: z.string().datetime().nullable().optional(),
+  blockers: z.string().max(10000).nullable().optional(),
+  lessons_learned: z.string().max(10000).nullable().optional(),
+  next_focus: z.string().max(10000).nullable().optional(),
+  freeform_notes: z.string().max(10000).nullable().optional(),
 });
 
 export type UpdateReviewInput = z.infer<typeof updateReviewSchema>;

@@ -1,11 +1,21 @@
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { exportLimiter } from "@/lib/rate-limit";
 
 export async function GET() {
   try {
     const supabase = await createServerSupabaseClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    // Rate limit: 3 exports/minute per user
+    const rateCheck = exportLimiter.check(user.id);
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: "For mange eksportforespørsler. Vent litt." },
+        { status: 429 }
+      );
+    }
 
     // Export all user data
     const [tasks, events, goals, projects, tenders, financeItems, notes, reviews, workoutSessions, inboxItems] = await Promise.all([
@@ -45,7 +55,7 @@ export async function GET() {
       },
     });
   } catch (error) {
-    console.error("Export error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    console.error("[export] Export failed:", error instanceof Error ? error.message : error);
+    return NextResponse.json({ error: "Eksport feilet. Prøv igjen senere." }, { status: 500 });
   }
 }

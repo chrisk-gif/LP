@@ -4,6 +4,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { executeToolCall, normalizeToolCallInput, READ_ONLY_TOOLS } from "@/lib/ai/executor";
 import type { ExecutionResult } from "@/lib/ai/executor";
 import { CONFIDENCE_THRESHOLDS } from "@/lib/constants";
+import { aiCommandLimiter } from "@/lib/rate-limit";
 
 interface ActionResult {
   action: string;
@@ -24,6 +25,15 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Rate limit: 20 requests/minute per user
+    const rateCheck = aiCommandLimiter.check(user.id);
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: "For mange forespørsler. Vent litt og prøv igjen." },
+        { status: 429, headers: { "Retry-After": String(Math.ceil((rateCheck.resetAt - Date.now()) / 1000)) } }
+      );
     }
 
     const body = await request.json();
@@ -227,13 +237,21 @@ export async function POST(request: NextRequest) {
       actions: [],
     });
   } catch (error) {
-    console.error("AI command error:", error);
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    console.error("[ai/command] Command failed:", msg);
+
+    // Check for missing API key specifically
+    const isConfigError = msg.includes("ANTHROPIC_API_KEY");
     return NextResponse.json(
       {
-        error: "Internal server error",
-        response: "Beklager, en feil oppstod ved behandling av kommandoen.",
+        error: isConfigError
+          ? "AI-tjenesten er ikke konfigurert."
+          : "Beklager, en feil oppstod ved behandling av kommandoen.",
+        response: isConfigError
+          ? "AI-tjenesten er ikke tilgjengelig for øyeblikket."
+          : "Beklager, en feil oppstod ved behandling av kommandoen.",
       },
-      { status: 500 }
+      { status: isConfigError ? 503 : 500 }
     );
   }
 }

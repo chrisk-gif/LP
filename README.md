@@ -6,8 +6,8 @@ A comprehensive Personal Operating System that unifies work (Asplan Viak), busin
 
 - **Frontend**: Next.js 16 (App Router), TypeScript, Tailwind CSS, shadcn/ui
 - **Backend**: Supabase (Auth, PostgreSQL, Storage, Realtime)
-- **AI**: Anthropic Claude API (Sonnet 4 for routing, Opus 4.1 for planning)
-- **Voice**: Web Speech API + MediaRecorder fallback
+- **AI**: Anthropic Claude API (Sonnet 4 for routing, Opus 4 for planning)
+- **Voice**: Browser Web Speech API (Chrome/Edge) — no server-side STT
 - **Testing**: Vitest, Playwright
 
 ## Quick Start
@@ -86,12 +86,21 @@ src/
 │   │   ├── assistent/      # AI assistant
 │   │   └── innstillinger/  # Settings
 │   ├── api/                # API routes
-│   │   ├── ai/             # AI endpoints
+│   │   ├── ai/             # AI command endpoint
+│   │   ├── areas/          # Area listing
 │   │   ├── tasks/          # Task CRUD
 │   │   ├── events/         # Event CRUD
+│   │   ├── projects/       # Project CRUD
+│   │   ├── goals/          # Goal CRUD
+│   │   ├── tenders/        # Tender CRUD
 │   │   ├── finance/        # Finance CRUD
+│   │   ├── notes/          # Note CRUD
+│   │   ├── reviews/        # Review CRUD
 │   │   ├── voice/          # Voice transcription
-│   │   └── export/         # Data export
+│   │   ├── export/         # Data export (JSON)
+│   │   ├── health/         # Health/readiness check
+│   │   ├── preferences/    # User preferences
+│   │   └── search/         # Cross-entity search
 │   ├── auth/               # Auth callback
 │   └── login/              # Login page
 ├── components/
@@ -153,7 +162,7 @@ supabase/
 The AI system uses Anthropic's Claude models with structured tool calling:
 
 - **Command Router** (Claude Sonnet 4) - Interprets user commands and routes to tools
-- **Executive Planner** (Claude Opus 4.1) - Day/week planning and prioritization
+- **Executive Planner** (Claude Opus 4) - Day/week planning and prioritization
 - **Tender Pilot** - Tender-specific summaries and risk analysis
 - **Finance Clerk** - Bill reminders and categorization
 - **Training Coach** - Workout planning and logging
@@ -163,21 +172,38 @@ All AI writes go through typed service layers with validation and audit logging.
 
 ## Voice System
 
-Hybrid approach:
-1. **Browser path**: Web Speech API for live recognition + speechSynthesis for responses
-2. **Fallback path**: MediaRecorder capture + server-side transcription
-3. **Shared pipeline**: Both paths feed into the same intent router
-
-Supports Norwegian (nb-NO) and English commands.
+Browser-only approach using the Web Speech API:
+- **Recognition**: Browser SpeechRecognition (Chrome/Edge) for live Norwegian (nb-NO) speech-to-text
+- **Synthesis**: Browser speechSynthesis for reading AI responses (controlled by `voice_tts_enabled` setting)
+- **Pipeline**: Transcripts feed directly into the AI command router
+- **Unsupported browsers**: Fail immediately with a clear error — no fake server-side fallback
 
 ## Security
 
 - Row Level Security (RLS) on all Supabase tables
 - Service role key never exposed to browser
-- All inputs validated with Zod
-- AI writes require confirmation for medium/low confidence
-- Private storage buckets with access control
+- All inputs validated with Zod schemas
+- AI writes require confirmation unless auto-execute is enabled and confidence is high
+- Rate limiting on AI (20/min), voice (15/min), and export (3/min) routes
+- Private storage buckets with user-scoped paths
 - Tender data marked as confidential by default
+
+## Production Deployment
+
+Deployed on **Netlify** with `@netlify/plugin-nextjs` (standalone mode).
+
+See `docs/release-checklist.md` for deploy steps, smoke tests, and rollback instructions.
+See `docs/ship-status.md` for current module maturity.
+
+## Current Limitations
+
+- AI features require `ANTHROPIC_API_KEY` — app functions without it but returns 503 for AI commands
+- Voice recognition works only in Chrome/Edge (Web Speech API)
+- No push notifications (marked as unavailable in settings)
+- No scheduled morning summaries (marked as unavailable in settings)
+- Single-user system — no collaboration features
+- Rate limits are in-memory (reset on redeploy)
+- Data import/restore is not supported — export is one-way
 
 ## Environment Variables
 

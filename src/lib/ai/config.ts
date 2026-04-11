@@ -4,9 +4,13 @@ let clientInstance: Anthropic | null = null;
 
 export function getAnthropicClient(): Anthropic {
   if (!clientInstance) {
-    clientInstance = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
-    });
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "ANTHROPIC_API_KEY is not set. AI features require a valid API key."
+      );
+    }
+    clientInstance = new Anthropic({ apiKey });
   }
   return clientInstance;
 }

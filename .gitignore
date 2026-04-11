@@ -21,6 +21,7 @@ build/
 private_key*
 service_account*
 secrets/
+netlify-env-import.env
 
 # IDE
 .vscode/

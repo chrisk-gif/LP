@@ -565,13 +565,34 @@ function EventDeepLinker({
 
   useEffect(() => {
     const eventId = searchParams.get("eventId");
-    if (eventId && events.length > 0 && !handled.current) {
-      const found = events.find((e) => e.id === eventId);
-      if (found) {
-        onOpenEvent(found);
-        handled.current = true;
+    if (!eventId || handled.current) return;
+
+    // First try: find in already-loaded events
+    const found = events.find((e) => e.id === eventId);
+    if (found) {
+      onOpenEvent(found);
+      handled.current = true;
+      return;
+    }
+
+    // Second try: fetch the specific event by ID (handles events outside current range)
+    async function fetchEventById() {
+      try {
+        const res = await fetch(`/api/events?id=${encodeURIComponent(eventId!)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        // API may return array or single object
+        const raw: ApiEvent | undefined = Array.isArray(data) ? data[0] : data;
+        if (raw) {
+          onOpenEvent(mapApiEvent(raw));
+          handled.current = true;
+        }
+      } catch {
+        // Deep-link fetch failure is non-critical
       }
     }
+
+    fetchEventById();
   }, [searchParams, events, onOpenEvent]);
 
   return null;

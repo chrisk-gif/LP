@@ -97,7 +97,10 @@ export default function AssistantPage() {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const lastTranscriptRef = useRef<string>("");
+  // Track voice submissions by incrementing counter, not by transcript content.
+  // This allows the same command to be spoken twice consecutively.
+  const voiceSubmitCountRef = useRef(0);
+  const lastVoiceSubmitRef = useRef(0);
 
   const sendCommand = useCallback(
     async (text: string, isVoice = false) => {
@@ -175,13 +178,19 @@ export default function AssistantPage() {
     [isLoading, voiceTtsEnabled, voice]
   );
 
-  // When voice transcript completes, auto-submit through the real command pipeline
+  // When voice transcript completes, auto-submit through the real command pipeline.
+  // We use a counter instead of comparing transcript content so that repeating
+  // the same spoken command twice in a row works correctly.
   useEffect(() => {
-    if (voice.transcript && !voice.isListening && voice.transcript !== lastTranscriptRef.current) {
-      lastTranscriptRef.current = voice.transcript;
-      const transcript = voice.transcript;
-      voice.reset();
-      sendCommand(transcript, true);
+    if (voice.transcript && !voice.isListening) {
+      voiceSubmitCountRef.current += 1;
+      const thisSubmit = voiceSubmitCountRef.current;
+      if (thisSubmit !== lastVoiceSubmitRef.current) {
+        lastVoiceSubmitRef.current = thisSubmit;
+        const transcript = voice.transcript;
+        voice.reset();
+        sendCommand(transcript, true);
+      }
     }
   }, [voice.isListening, voice.transcript, voice.reset, sendCommand, voice]);
 

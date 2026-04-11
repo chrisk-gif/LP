@@ -346,15 +346,20 @@ describe("R5-P0: AI tool definitions require area for writes", () => {
     expect(schema.required).toContain("area");
   });
 
-  it("area enum includes SQL default areas (jobb, helse)", async () => {
+  it("area enum contains only canonical slugs (no legacy jobb, helse)", async () => {
     const { AI_TOOLS } = await import("@/lib/ai/tools");
     const tool = AI_TOOLS.find((t) => t.name === "create_task");
     const props = (tool!.input_schema as { properties: Record<string, { enum?: string[] }> }).properties;
     const areaEnum = props.area.enum!;
-    expect(areaEnum).toContain("jobb");
-    expect(areaEnum).toContain("helse");
+    // Canonical set only
     expect(areaEnum).toContain("privat");
     expect(areaEnum).toContain("asplan-viak");
+    expect(areaEnum).toContain("ytly");
+    expect(areaEnum).toContain("okonomi");
+    expect(areaEnum).toContain("trening");
+    // Legacy aliases must NOT be in the enum
+    expect(areaEnum).not.toContain("jobb");
+    expect(areaEnum).not.toContain("helse");
   });
 });
 
@@ -393,29 +398,7 @@ describe("R5-P0: Zod schema alignment with SQL", () => {
   });
 });
 
-// ===========================================================================
-// R5-P1: Voice Integration Tests
-// ===========================================================================
-
-describe("R5-P1: Voice pipeline consistency", () => {
-  it("MicButton does not invoke dead recording fallback when no browser speech", async () => {
-    // Verify that the MicButton component's click handler for unsupported
-    // environments shows an error message immediately, not starting recording.
-    // We test the logic, not the component rendering.
-    const { MicButton } = await import("@/components/MicButton");
-    expect(MicButton).toBeDefined();
-    // The fact that the component no longer contains startRecording logic
-    // and instead shows an error message is verified by source structure,
-    // but here we verify the export exists and the component is valid.
-  });
-
-  it("useVoice hook exposes consistent API for both assistant and global mic", async () => {
-    // Both entry points use the same hook for capabilities detection
-    const { useVoice } = await import("@/hooks/useVoice");
-    expect(useVoice).toBeDefined();
-    expect(typeof useVoice).toBe("function");
-  });
-});
+// R5-P1 voice tests moved to round6-integration.test.ts with real behavior checks
 
 // ===========================================================================
 // R5-P2: Calendar Event Contract Tests
@@ -500,36 +483,7 @@ describe("R5-P2: Assistant confirmation contract", () => {
 // R5-P3: Command Palette Deep Links
 // ===========================================================================
 
-describe("R5-P3: Command palette result deep-linking", () => {
-  it("CommandPalette component exists and is importable", async () => {
-    const mod = await import("@/components/CommandPalette");
-    expect(mod.CommandPalette).toBeDefined();
-  });
-
-  // Verify that the search API returns the right shape
-  it("search result shape includes id for deep-linking", () => {
-    // This tests the contract, not the implementation
-    interface SearchResults {
-      tasks: Array<{ id: string; title: string; status: string; priority: string }>;
-      events: Array<{ id: string; title: string; event_type: string; start_time: string }>;
-      projects: Array<{ id: string; title: string; status: string }>;
-      notes: Array<{ id: string; title: string }>;
-    }
-
-    const mockResults: SearchResults = {
-      tasks: [{ id: "t1", title: "Test", status: "todo", priority: "medium" }],
-      events: [{ id: "e1", title: "Meeting", event_type: "meeting", start_time: "2026-04-10T09:00:00Z" }],
-      projects: [{ id: "p1", title: "Project A", status: "active" }],
-      notes: [{ id: "n1", title: "Note 1" }],
-    };
-
-    // Each result type has an id suitable for deep-linking
-    expect(mockResults.tasks[0].id).toBeDefined();
-    expect(mockResults.events[0].id).toBeDefined();
-    expect(mockResults.projects[0].id).toBeDefined();
-    expect(mockResults.notes[0].id).toBeDefined();
-  });
-});
+// R5-P3 command palette tests moved to round6-integration.test.ts with real behavior checks
 
 // ===========================================================================
 // R5-P0: Event end_time default rule consistency
@@ -600,7 +554,8 @@ describe("R5-P0: Weekly summary does not use completed_at", () => {
     // The mock allows any query to succeed, but the important thing is
     // the code path does not reference completed_at on tasks
     expect(result.success).toBe(true);
-    expect(result.data).toHaveProperty("tasks_completed");
+    expect(result.data).toHaveProperty("tasks_done_recently");
+    expect(result.data).toHaveProperty("tasks_done_note");
   });
 });
 

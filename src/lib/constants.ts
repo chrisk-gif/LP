@@ -12,6 +12,34 @@ export const AREA_SLUGS = [
 
 export type AreaSlug = (typeof AREA_SLUGS)[number];
 
+/**
+ * Alias map: common alternative names → canonical area slugs.
+ * AI tool calls may produce these; they must be normalized before execution.
+ */
+export const AREA_ALIASES: Record<string, AreaSlug> = {
+  jobb: "asplan-viak",
+  arbeid: "asplan-viak",
+  work: "asplan-viak",
+  helse: "trening",
+  health: "trening",
+  "ytly.no": "ytly",
+  business: "ytly",
+  finance: "okonomi",
+  økonomi: "okonomi",
+  personal: "privat",
+  private: "privat",
+};
+
+const CANONICAL_SET = new Set<string>(AREA_SLUGS);
+
+/** Resolve an area input to a canonical slug, or null if unrecognizable. */
+export function resolveCanonicalArea(input: unknown): AreaSlug | null {
+  if (typeof input !== "string" || !input) return null;
+  const lower = input.toLowerCase().trim();
+  if (CANONICAL_SET.has(lower)) return lower as AreaSlug;
+  return AREA_ALIASES[lower] ?? null;
+}
+
 export const AREA_DEFAULTS: Record<
   AreaSlug,
   { name: string; color: string; icon: string }

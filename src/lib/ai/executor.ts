@@ -1,5 +1,6 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { resolveCanonicalArea } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,15 +55,17 @@ interface NormalizationResult {
   ok: boolean;
   input: Record<string, unknown>;
   missing: string[];
+  invalid: string[];
   message?: string;
 }
 
 /**
  * Normalize and validate AI tool call input before execution.
- * For write tools, ensures all SQL NOT NULL fields are resolvable.
+ * For write tools, ensures all SQL NOT NULL fields are resolvable and
+ * area values resolve to the canonical taxonomy.
  * Returns one of:
  *   - { ok: true, input: normalizedInput } — ready for DB execution
- *   - { ok: false, missing: [...] } — confirmation required, fields unresolved
+ *   - { ok: false, missing/invalid: [...] } — needs clarification
  */
 export function normalizeToolCallInput(
   toolName: string,
@@ -70,30 +73,47 @@ export function normalizeToolCallInput(
 ): NormalizationResult {
   // Read-only tools pass through
   if (!WRITE_TOOLS.has(toolName)) {
-    return { ok: true, input, missing: [] };
+    return { ok: true, input, missing: [], invalid: [] };
   }
 
   const missing: string[] = [];
+  const invalid: string[] = [];
   const normalized = { ...input };
+
+  // Helper: validate and normalize area field to canonical slug
+  function normalizeArea() {
+    if (!normalized.area) {
+      missing.push("area");
+      return;
+    }
+    const canonical = resolveCanonicalArea(normalized.area);
+    if (!canonical) {
+      invalid.push(`area (ukjent verdi: "${normalized.area}")`);
+      return;
+    }
+    normalized.area = canonical;
+  }
 
   switch (toolName) {
     case "create_task": {
       if (!normalized.title) missing.push("title");
-      // area_id is NOT NULL in SQL — area slug must be provided
-      if (!normalized.area) missing.push("area");
+      normalizeArea();
       break;
     }
     case "create_event": {
       if (!normalized.title) missing.push("title");
       if (!normalized.start_time) missing.push("start_time");
-      // area_id is NOT NULL in SQL — area slug must be provided
-      if (!normalized.area) missing.push("area");
+      normalizeArea();
       // end_time is NOT NULL in SQL — apply default rule: +60 minutes
       if (!normalized.end_time && normalized.start_time && !normalized.all_day) {
         try {
           const start = new Date(normalized.start_time as string);
-          const end = new Date(start.getTime() + 60 * 60 * 1000);
-          normalized.end_time = end.toISOString();
+          if (isNaN(start.getTime())) {
+            invalid.push("start_time (ugyldig dato)");
+          } else {
+            const end = new Date(start.getTime() + 60 * 60 * 1000);
+            normalized.end_time = end.toISOString();
+          }
         } catch {
           missing.push("end_time");
         }
@@ -113,6 +133,15 @@ export function normalizeToolCallInput(
     case "create_note": {
       if (!normalized.title) missing.push("title");
       if (!normalized.content) missing.push("content");
+      // area is optional for notes, but normalize if provided
+      if (normalized.area) {
+        const canonical = resolveCanonicalArea(normalized.area);
+        if (!canonical) {
+          invalid.push(`area (ukjent verdi: "${normalized.area}")`);
+        } else {
+          normalized.area = canonical;
+        }
+      }
       break;
     }
     case "complete_task": {
@@ -130,16 +159,20 @@ export function normalizeToolCallInput(
     }
   }
 
-  if (missing.length > 0) {
+  if (missing.length > 0 || invalid.length > 0) {
+    const parts: string[] = [];
+    if (missing.length > 0) parts.push(`Mangler: ${missing.join(", ")}`);
+    if (invalid.length > 0) parts.push(`Ugyldig: ${invalid.join(", ")}`);
     return {
       ok: false,
       input: normalized,
       missing,
-      message: `Mangler påkrevde felt: ${missing.join(", ")}`,
+      invalid,
+      message: parts.join(". "),
     };
   }
 
-  return { ok: true, input: normalized, missing: [] };
+  return { ok: true, input: normalized, missing: [], invalid: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -549,8 +582,9 @@ async function executeQueryData(
       weekAgo.setDate(weekAgo.getDate() - 7);
       const weekAgoStr = weekAgo.toISOString();
 
-      // tasks has no completed_at column — use updated_at with status='done'
-      // to approximate "completed this week" (task was marked done recently)
+      // tasks has no completed_at column — count tasks currently marked done
+      // whose updated_at falls within the window. This is an approximation:
+      // a task edited for other reasons will also match. We label it honestly.
       const [tasksRes, eventsRes, workoutsRes] = await Promise.all([
         supabase
           .from("tasks")
@@ -569,8 +603,10 @@ async function executeQueryData(
       ]);
 
       return ok("Ukessammendrag hentet.", undefined, undefined, {
-        tasks_completed: tasksRes.count ?? 0,
-        events_attended: eventsRes.count ?? 0,
+        // Honest label: "recently marked done" not "completed this week"
+        tasks_done_recently: tasksRes.count ?? 0,
+        tasks_done_note: "Basert på oppgaver med status=done oppdatert siste 7 dager (omtrentlig)",
+        events_in_period: eventsRes.count ?? 0,
         workouts_logged: workoutsRes.count ?? 0,
         total_workout_minutes: (workoutsRes.data ?? []).reduce(
           (sum: number, w: Record<string, unknown>) =>

@@ -138,7 +138,7 @@ export async function POST(request: NextRequest) {
     const normalizedToolCalls = (result.toolCalls ?? []).map((tc) => {
       const norm = normalizeToolCallInput(tc.name, tc.input);
       if (!norm.ok) allNormalized = false;
-      return { ...tc, input: norm.input, normOk: norm.ok, normMissing: norm.missing, normMessage: norm.message };
+      return { ...tc, input: norm.input, normOk: norm.ok, normMissing: norm.missing, normInvalid: norm.invalid, normMessage: norm.message };
     });
 
     // Write tools with unresolved required fields must force confirmation, never auto-execute
@@ -186,16 +186,40 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // ---------------------------------------------------------------
+    // If normalization failed (missing/invalid fields), return a
+    // CLARIFICATION response — NOT a confirmation. The UI must not
+    // show "Bekreft" for tool calls that cannot actually execute.
+    // ---------------------------------------------------------------
+    if (!allNormalized) {
+      const problems = normalizedToolCalls
+        .filter(tc => !tc.normOk)
+        .map(tc => tc.normMessage)
+        .filter(Boolean)
+        .join("; ");
+
+      return NextResponse.json({
+        intent: result.intent,
+        confidence: result.confidence,
+        response: `${result.explanation}\n\nKan ikke utføre ennå: ${problems}`,
+        fields: result.fields,
+        area: result.area,
+        // Key: NOT confirmationRequired — this is a clarification, not a runnable confirmation
+        confirmationRequired: false,
+        clarificationRequired: true,
+        toolCalls: [],
+        actions: [],
+      });
+    }
+
     // Return parsed intent without executing (confirmation required or
-    // low confidence or no tool calls or auto-execute disabled or unresolved fields)
-    // Send the normalized tool calls so end_time defaults etc. are visible in confirmation UI
-    const toolCallsForResponse = normalizedToolCalls.map(({ normOk: _a, normMissing: _b, normMessage: _c, ...rest }) => rest);
+    // low confidence or auto-execute disabled)
+    // Only reach here when allNormalized=true — tool calls are actually executable
+    const toolCallsForResponse = normalizedToolCalls.map(({ normOk: _a, normMissing: _b, normInvalid: _c, normMessage: _d, ...rest }) => rest);
     return NextResponse.json({
       intent: result.intent,
       confidence: result.confidence,
-      response: !allNormalized
-        ? `${result.explanation} (Mangler felt som må fylles ut: ${normalizedToolCalls.filter(tc => !tc.normOk).flatMap(tc => tc.normMissing).join(", ")})`
-        : result.explanation,
+      response: result.explanation,
       fields: result.fields,
       area: result.area,
       confirmationRequired: hasToolCalls && !isReadOnly ? true : false,

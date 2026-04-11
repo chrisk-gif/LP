@@ -13,7 +13,6 @@ import { Mic, MicOff, Loader2, CheckCircle2, XCircle } from "lucide-react";
 type PipelineState =
   | "idle"
   | "listening"
-  | "recording"
   | "processing"
   | "executing"
   | "confirming";
@@ -52,11 +51,29 @@ export function MicButton() {
     Array<{ name: string; input: Record<string, unknown> }> | null
   >(null);
 
+  const [voiceTtsEnabled, setVoiceTtsEnabled] = useState(false);
+
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setHasBrowserSpeech(getBrowserSpeechRecognition() !== null);
+  }, []);
+
+  // Load voice_tts_enabled preference — same as assistant page
+  useEffect(() => {
+    async function loadTtsPref() {
+      try {
+        const res = await fetch("/api/preferences");
+        if (res.ok) {
+          const data = await res.json();
+          setVoiceTtsEnabled(data.voice_tts_enabled === true);
+        }
+      } catch {
+        // Default to false
+      }
+    }
+    loadTtsPref();
   }, []);
 
   // Clear any pending dismiss timer
@@ -84,6 +101,8 @@ export function MicButton() {
   const sendToAiCommand = useCallback(
     async (text: string) => {
       setState("executing");
+      clearDismissTimer();
+      let enteredConfirming = false;
       try {
         const res = await fetch("/api/ai/command", {
           method: "POST",
@@ -115,26 +134,37 @@ export function MicButton() {
           setAiResponse(data.response ?? "Bekreft handlingen nedenfor.");
           setAiSuccess(null);
           setState("confirming");
-          // Do NOT auto-dismiss while awaiting confirmation
+          enteredConfirming = true;
+          // Do NOT auto-dismiss while awaiting confirmation — confirmation
+          // must remain visible until Bekreft, Avbryt, or explicit user action
           return;
         }
 
-        setAiResponse(data.response ?? data.error ?? "Ingen respons.");
-        setAiSuccess(
-          !data.error &&
+        const responseText = data.response ?? data.error ?? "Ingen respons.";
+        setAiResponse(responseText);
+        const success = !data.error &&
             (data.actions?.some((a) => a.status === "done") ||
-              data.intent !== "unknown")
-        );
+              data.intent !== "unknown");
+        setAiSuccess(success);
+
+        // TTS: speak response if enabled — same behavior as assistant page
+        if (voiceTtsEnabled && responseText && "speechSynthesis" in window) {
+          const utterance = new SpeechSynthesisUtterance(responseText);
+          utterance.lang = "nb-NO";
+          speechSynthesis.speak(utterance);
+        }
       } catch {
         setAiResponse("Kunne ikke koble til AI-tjenesten.");
         setAiSuccess(false);
       } finally {
-        // Only transition to idle if not in confirming state
-        setState((prev) => (prev === "confirming" ? prev : "idle"));
-        if (state !== "confirming") scheduleDismiss();
+        // Use local flag instead of stale closure over `state`
+        if (!enteredConfirming) {
+          setState((prev) => (prev === "confirming" ? prev : "idle"));
+          scheduleDismiss();
+        }
       }
     },
-    [scheduleDismiss, state]
+    [scheduleDismiss, clearDismissTimer, voiceTtsEnabled]
   );
 
   // Confirm pending tool calls from global mic

@@ -15,8 +15,8 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         },
         area: {
           type: "string",
-          enum: ["asplan-viak", "ytly", "privat", "jobb", "helse", "okonomi", "trening"],
-          description: "Hvilket område oppgaven tilhører (påkrevd). Bruk 'privat' som standard hvis brukeren ikke spesifiserer.",
+          enum: ["asplan-viak", "ytly", "privat", "okonomi", "trening"],
+          description: "Hvilket område oppgaven tilhører (påkrevd). Bruk 'privat' som standard hvis brukeren ikke spesifiserer. Bruk 'asplan-viak' for jobb/arbeid, 'trening' for helse.",
         },
         priority: {
           type: "string",
@@ -53,8 +53,8 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         description: { type: "string", description: "Valgfri beskrivelse" },
         area: {
           type: "string",
-          enum: ["asplan-viak", "ytly", "privat", "jobb", "helse", "okonomi", "trening"],
-          description: "Hvilket område hendelsen tilhører (påkrevd). Bruk 'privat' som standard.",
+          enum: ["asplan-viak", "ytly", "privat", "okonomi", "trening"],
+          description: "Hvilket område hendelsen tilhører (påkrevd). Bruk 'privat' som standard. Bruk 'asplan-viak' for jobb/arbeid, 'trening' for helse.",
         },
         start_time: {
           type: "string",
@@ -166,7 +166,8 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         content: { type: "string", description: "Innhold" },
         area: {
           type: "string",
-          enum: ["asplan-viak", "ytly", "privat", "jobb", "helse", "okonomi", "trening"],
+          enum: ["asplan-viak", "ytly", "privat", "okonomi", "trening"],
+          description: "Hvilket område notatet tilhører. Bruk 'asplan-viak' for jobb/arbeid, 'trening' for helse.",
         },
       },
       required: ["title", "content"],

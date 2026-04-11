@@ -9,9 +9,21 @@ export async function GET(request: NextRequest) {
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const searchParams = request.nextUrl.searchParams;
+    const eventId = searchParams.get("id");
     const start_after = searchParams.get("start_after");
     const start_before = searchParams.get("start_before");
     const area_id = searchParams.get("area_id");
+
+    // Single event lookup by ID (used by deep-link when event is outside loaded range)
+    if (eventId) {
+      const { data, error } = await supabase
+        .from("events")
+        .select("*, areas(name, slug, color)")
+        .eq("id", eventId)
+        .single();
+      if (error) return NextResponse.json({ error: "Event not found" }, { status: 404 });
+      return NextResponse.json(data);
+    }
 
     let query = supabase
       .from("events")

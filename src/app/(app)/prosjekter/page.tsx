@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { FolderKanban, Plus, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -46,6 +53,7 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [viewProject, setViewProject] = useState<Project | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -117,7 +125,7 @@ export default function ProjectsPage() {
             projects
               .filter((p) => p.status === "active")
               .map((project) => (
-                <ProjectCard key={project.id} project={project} />
+                <ProjectCard key={project.id} project={project} onClick={setViewProject} />
               ))
           )}
         </TabsContent>
@@ -159,18 +167,26 @@ export default function ProjectsPage() {
             projects
               .filter((p) => p.status === "completed")
               .map((project) => (
-                <ProjectCard key={project.id} project={project} />
+                <ProjectCard key={project.id} project={project} onClick={setViewProject} />
               ))
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Project detail dialog */}
+      <ProjectDetailDialog project={viewProject} onClose={() => setViewProject(null)} />
+
+      {/* Deep-link: ?projectId=<uuid> opens project detail */}
+      <Suspense fallback={null}>
+        <ProjectDeepLinker projects={projects} onOpenProject={setViewProject} />
+      </Suspense>
     </div>
   );
 }
 
-function ProjectCard({ project }: { project: Project }) {
+function ProjectCard({ project, onClick }: { project: Project; onClick?: (p: Project) => void }) {
   return (
-    <Card className="cursor-pointer hover:shadow-md transition-shadow">
+    <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => onClick?.(project)}>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -218,5 +234,91 @@ function ProjectCard({ project }: { project: Project }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ==========================================================================
+// Deep-link handler: ?projectId=<uuid> opens project detail
+// ==========================================================================
+
+function ProjectDeepLinker({
+  projects,
+  onOpenProject,
+}: {
+  projects: Project[];
+  onOpenProject: (project: Project) => void;
+}) {
+  const searchParams = useSearchParams();
+  const [handled, setHandled] = useState(false);
+
+  useEffect(() => {
+    const projectId = searchParams.get("projectId");
+    if (!projectId || handled) return;
+
+    const found = projects.find((p) => p.id === projectId);
+    if (found) {
+      onOpenProject(found);
+      setHandled(true);
+    }
+  }, [searchParams, projects, onOpenProject, handled]);
+
+  return null;
+}
+
+// ==========================================================================
+// Project detail dialog
+// ==========================================================================
+
+function ProjectDetailDialog({
+  project,
+  onClose,
+}: {
+  project: Project | null;
+  onClose: () => void;
+}) {
+  if (!project) return null;
+
+  return (
+    <Dialog open={!!project} onOpenChange={() => onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{project.title}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          {project.description && (
+            <p className="text-sm text-muted-foreground">{project.description}</p>
+          )}
+          <div className="flex items-center gap-4 text-sm">
+            <Badge variant="outline">
+              {statusLabels[project.status] ?? project.status}
+            </Badge>
+            <span className="text-muted-foreground capitalize">
+              Prioritet: {project.priority}
+            </span>
+          </div>
+          {project.areas && (
+            <div className="flex items-center gap-1">
+              <div
+                className="w-3 h-3 rounded-full"
+                style={{ backgroundColor: project.areas.color ?? "#6b7280" }}
+              />
+              <span className="text-sm">{project.areas.name}</span>
+            </div>
+          )}
+          {project.due_date && (
+            <p className="text-sm text-muted-foreground">
+              Frist: {new Date(project.due_date).toLocaleDateString("nb-NO")}
+            </p>
+          )}
+          <div className="space-y-1">
+            <div className="flex justify-between text-sm">
+              <span>Fremgang</span>
+              <span>{project.progress}%</span>
+            </div>
+            <Progress value={project.progress} className="h-2" />
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

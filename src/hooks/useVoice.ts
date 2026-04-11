@@ -11,15 +11,12 @@ export interface VoiceCapabilities {
 }
 
 export interface UseVoiceReturn {
-  isRecording: boolean;
   isListening: boolean;
   transcript: string;
   interimTranscript: string;
   capabilities: VoiceCapabilities;
   startListening: () => void;
   stopListening: () => void;
-  startRecording: () => void;
-  stopRecording: () => Promise<Blob | null>;
   speak: (text: string) => void;
   cancelSpeech: () => void;
   reset: () => void;
@@ -32,7 +29,6 @@ function getSpeechRecognitionConstructor(): (new () => any) | null {
 }
 
 export function useVoice(): UseVoiceReturn {
-  const [isRecording, setIsRecording] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
@@ -43,8 +39,6 @@ export function useVoice(): UseVoiceReturn {
   });
 
   const recognitionRef = useRef<any>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
     setCapabilities({
@@ -111,54 +105,6 @@ export function useVoice(): UseVoiceReturn {
     setInterimTranscript("");
   }, []);
 
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-      });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : "audio/webm",
-      });
-
-      chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (error) {
-      console.error("Failed to start recording:", error);
-    }
-  }, []);
-
-  const stopRecording = useCallback(async (): Promise<Blob | null> => {
-    return new Promise((resolve) => {
-      const recorder = mediaRecorderRef.current;
-      if (!recorder || recorder.state === "inactive") {
-        setIsRecording(false);
-        resolve(null);
-        return;
-      }
-
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        chunksRef.current = [];
-        setIsRecording(false);
-        recorder.stream.getTracks().forEach((track) => track.stop());
-        resolve(blob);
-      };
-
-      recorder.stop();
-    });
-  }, []);
-
   const speak = useCallback((text: string) => {
     if (!("speechSynthesis" in window)) return;
 
@@ -186,20 +132,16 @@ export function useVoice(): UseVoiceReturn {
     setTranscript("");
     setInterimTranscript("");
     stopListening();
-    stopRecording();
     cancelSpeech();
-  }, [stopListening, stopRecording, cancelSpeech]);
+  }, [stopListening, cancelSpeech]);
 
   return {
-    isRecording,
     isListening,
     transcript,
     interimTranscript,
     capabilities,
     startListening,
     stopListening,
-    startRecording,
-    stopRecording,
     speak,
     cancelSpeech,
     reset,
